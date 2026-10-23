@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./enhancements.css";
 import AuthGate from "./AuthGate.jsx";
-import { API_AVAILABLE, apiFetch } from "./api.js";
+import { API_AVAILABLE, LOCAL_MODE, apiFetch } from "./api.js";
 import {
   ArrowRight, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight,
   CircleHelp, Clock3, Eye, EyeOff, ListTodo, MessageSquare, MoreHorizontal,
@@ -205,6 +205,18 @@ export default function App() {
     async function boot() {
       if (!API_AVAILABLE) {
         setAuthStatus("backend-missing");
+        return;
+      }
+      if (LOCAL_MODE) {
+        try {
+          const result = await apiFetch("/api/auth/me");
+          if (!active) return;
+          await establishSession(result.user);
+        } catch (error) {
+          if (!active) return;
+          setAuthStatus("backend-error");
+          setAuthNotice(error.message || "The local Smart Calendar server is not responding.");
+        }
         return;
       }
       const params = new URLSearchParams(window.location.search);
@@ -559,10 +571,10 @@ export default function App() {
       });
       setConfig(previous => ({ ...previous, apiKey: "", baseUrl: result.baseUrl || previous.baseUrl, model: result.model || previous.model }));
       setApiKeyConfigured(Boolean(result.apiKeyConfigured));
-      setTestMessage("AI settings saved to your account.");
+      setTestMessage(LOCAL_MODE ? "AI settings saved on this computer." : "AI settings saved to your account.");
       setTestState("success");
       setShowSettings(false);
-      setToast("AI settings saved to your account");
+      setToast(LOCAL_MODE ? "AI settings saved on this computer" : "AI settings saved to your account");
     } catch (error) {
       setTestState("error");
       setTestMessage(error.message || "Could not save your AI settings.");
@@ -642,7 +654,7 @@ export default function App() {
     <main className="app-shell">
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><CalendarDays size={21} /></div><span>smart<span className="brand-light">calendar</span></span><span className="beta-tag">BETA</span></div>
-        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><span className="account-email" title={user.email}>{user.email}</span><IconButton title="Setup guide" onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton><button type="button" className="account-signout" onClick={handleSignOut}>Sign out</button><div className="avatar">{user.email.slice(0, 1).toUpperCase()}</div></div>
+        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><span className="account-email" title={LOCAL_MODE ? "Data stays on this computer" : user.email}>{LOCAL_MODE ? "Local workspace" : user.email}</span><IconButton title="Setup guide" onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton>{!LOCAL_MODE && <button type="button" className="account-signout" onClick={handleSignOut}>Sign out</button>}<div className="avatar">{LOCAL_MODE ? "L" : user.email.slice(0, 1).toUpperCase()}</div></div>
       </header>
 
       <div className="mobile-switch">
@@ -729,7 +741,7 @@ export default function App() {
             <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Ask anything about your schedule…" rows={2} aria-label="Message the AI assistant" />
             <div className="composer-bottom"><span><ShieldCheck size={13} /> Your model, your choice</span><button className="send-button" type="submit" disabled={!chatInput.trim() || sending} aria-label="Send message">{sending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}</button></div>
           </form>
-          <p className="assistant-footnote">Signed in as {user.email}. AI can make mistakes; review important plans.</p>
+          <p className="assistant-footnote">{LOCAL_MODE ? "Your workspace is stored on this computer. AI requests go to the provider you configured." : "Signed in as " + user.email + "."} AI can make mistakes; review important plans.</p>
         </aside>
       </section>
 
