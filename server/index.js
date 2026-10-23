@@ -2,6 +2,9 @@ import "dotenv/config";
 import crypto from "node:crypto";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
+import { promises as dns } from "node:dns";
+import net from "node:net";
+import { ProxyAgent } from "undici";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -177,45 +180,80 @@ function chatEndpoint(baseUrl) {
   return /\/chat\/completions$/i.test(base) ? base : base + "/chat/completions";
 }
 async function getAISettings(userId) {
-  const result = await pool.query("SELECT base_url, model, api_key_ciphertext, api_key_iv, api_key_tag FROM ai_settings WHERE user_id = $1", [userId]);
+  const result = await pool.query("SELECT base_url, model, api_key_ciphertext, api_key_iv, api_key_tag, providers FROM ai_settings WHERE user_id = $1", [userId]);
   return result.rows[0] || null;
+}
+function privateProxyAddress(host) {
+  const h = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h === "metadata.google.internal") return true;
+  if (net.isIPv4(h)) {
+    const [a,b] = h.split(".").map(Number);
+    return a===0||a===10||a===127||a>=224||(a===169&&b===254)||(a===172&&b>=16&&b<=31)||(a===192&&b===168)||(a===100&&b>=64&&b<=127)||(a===198&&(b===18||b===19));
+  }
+  if (net.isIPv6(h)) return h==="::"||h==="::1"||h.startsWith("fc")||h.startsWith("fd")||h.startsWith("fe8")||h.startsWith("fe9")||h.startsWith("fea")||h.startsWith("feb")||h.startsWith("::ffff:");
+  return false;
+}
+async function validateAIProxyUrl(value) {
+  const raw=String(value||"").trim();if(!raw)return "";
+  let url;try{url=new URL(raw)}catch{throw new Error("Enter a valid HTTP or HTTPS proxy URL.");}
+  if(!["https:","http:"].includes(url.protocol)||!url.hostname||url.username||url.password||url.search||url.hash)throw new Error("Proxy URL must use HTTP or HTTPS without embedded credentials, query parameters, or fragments.");
+  const host=url.hostname.toLowerCase().replace(/^\[|\]$/g,"").replace(/\.$/,"");
+  if(privateProxyAddress(host))throw new Error("Private or loopback proxy URLs are not allowed on the hosted API. Use the local Smart Calendar package to connect to a proxy on your own computer.");
+  if(!net.isIP(host)){
+    try{const resolved=await dns.lookup(host,{all:true,verbatim:true});if(!resolved.length||resolved.some(x=>privateProxyAddress(x.address)))throw new Error("Proxy hostname resolves to a private address.");}
+    catch(e){throw new Error(e.message||"Could not verify the proxy hostname.");}
+  }
+  return url.toString().replace(/\/$/,"");
 }
 async function resolveAIConfig(userId, overrides = {}, allowUnsavedKey = false) {
   const saved = await getAISettings(userId);
-  const baseUrl = String(overrides.baseUrl || saved?.base_url || "").trim();
-  const model = String(overrides.model || saved?.model || "").trim();
-  let apiKey = "";
-  if (allowUnsavedKey && String(overrides.apiKey || "").trim()) {
-    apiKey = String(overrides.apiKey).trim();
-  } else if (saved?.api_key_ciphertext) {
-    apiKey = decryptSecret(saved);
+  const savedProviders = Array.isArray(saved?.providers) ? saved.providers : [];
+  const incoming = Array.isArray(overrides.providers) && overrides.providers.length
+    ? overrides.providers
+    : (allowUnsavedKey && (overrides.baseUrl || overrides.apiKey || overrides.model)
+        ? [{ ...(savedProviders[0] || {}), ...overrides, id: overrides.id || savedProviders[0]?.id || "primary" }]
+        : (savedProviders.length ? savedProviders : (saved ? [{ id:"primary", name:"Primary", baseUrl:saved.base_url, model:saved.model, api_key_ciphertext:saved.api_key_ciphertext, api_key_iv:saved.api_key_iv, api_key_tag:saved.api_key_tag, proxy_url:"" }] : [])));
+  const providers=[];
+  for(let i=0;i<incoming.length;i++){
+    const p=incoming[i]||{};if(p.enabled===false)continue;
+    const old=savedProviders.find(x=>String(x.id)===String(p.id))||savedProviders.find(x=>(x.base_url||x.baseUrl)===(p.baseUrl||p.base_url)&&(x.name||"")===p.name);
+    const baseUrl=validateAIBaseUrl(p.baseUrl||p.base_url||old?.base_url||saved?.base_url);
+    const model=String(p.model||old?.model||saved?.model||"").trim();
+    let apiKey="";
+    if(allowUnsavedKey&&String(p.apiKey||"").trim())apiKey=String(p.apiKey).trim();
+    else if(old?.api_key_ciphertext)apiKey=decryptSecret(old);
+    else if(p.api_key_ciphertext)apiKey=decryptSecret(p);
+    else if(i===0&&saved?.api_key_ciphertext)apiKey=decryptSecret(saved);
+    if(!model||model.length>200||!apiKey)throw Object.assign(new Error("Every enabled AI provider needs a Base URL, model, and API key."),{status:400});
+    const proxyUrl=await validateAIProxyUrl(p.proxyUrl||p.proxy_url||old?.proxy_url||"");
+    providers.push({id:String(p.id||"provider-"+i),name:String(p.name||`Provider ${i+1}`).slice(0,100),baseUrl,model,apiKey,proxyUrl});
   }
-  if (!baseUrl || !model || !apiKey) {
-    const error = new Error("Set your Base URL, model, and API key in AI settings first.");
-    error.status = 400;
-    throw error;
-  }
-  return { baseUrl: validateAIBaseUrl(baseUrl), model, apiKey };
+  if(!providers.length)throw Object.assign(new Error("Add at least one enabled AI provider."),{status:400});
+  return providers;
 }
-async function askAI(config, messages) {
-  const response = await fetch(chatEndpoint(config.baseUrl), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: "Bearer " + config.apiKey
-    },
-    body: JSON.stringify({ model: config.model, messages, temperature: 0.7 }),
-    signal: AbortSignal.timeout(35_000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(String(data?.error?.message || data?.message || `AI provider returned HTTP ${response.status}`).slice(0, 500));
-    error.status = 502;
-    throw error;
-  }
-  return data;
+async function askOneAI(config, messages) {
+  let dispatcher;
+  try {
+    if(config.proxyUrl)dispatcher=new ProxyAgent(config.proxyUrl);
+    const response = await fetch(chatEndpoint(config.baseUrl), {
+      method: "POST", headers: {"Content-Type": "application/json", Authorization: "Bearer " + config.apiKey},
+      body: JSON.stringify({ model: config.model, messages, temperature: 0.7 }),
+      signal: AbortSignal.timeout(35_000), ...(dispatcher ? { dispatcher } : {})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(String(data?.error?.message || data?.message || `AI provider returned HTTP ${response.status}`).slice(0, 500));
+    if(!data?.choices?.[0]?.message?.content)throw new Error("The provider returned no assistant message.");
+    return data;
+  } finally { if(dispatcher)await dispatcher.close().catch(()=>{}); }
 }
-
+async function askAIWithFallback(configs, messages) {
+  const failures=[];
+  for(const config of configs){
+    try{return {data:await askOneAI(config,messages),providerId:config.id,providerName:config.name};}
+    catch(error){failures.push(config.name+": "+String(error.message||"connection failed").slice(0,300));}
+  }
+  throw Object.assign(new Error("All AI providers failed. "+failures.join(" | ")),{status:502});
+}
 app.disable("x-powered-by");
 if (process.env.TRUST_PROXY === "true") app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
@@ -405,76 +443,99 @@ app.put("/api/events", requireAuth, async (req, res, next) => {
 app.get("/api/ai/settings", requireAuth, async (req, res, next) => {
   try {
     const row = await getAISettings(req.user.id);
-    return res.json({
-      baseUrl: row?.base_url || "https://api.openai.com/v1",
-      model: row?.model || "",
-      apiKeyConfigured: Boolean(row?.api_key_ciphertext)
-    });
+    let providers = Array.isArray(row?.providers) ? row.providers : [];
+    if (!providers.length && row?.api_key_ciphertext) providers = [{id:"primary",name:"Primary",base_url:row.base_url,model:row.model,proxy_url:"",enabled:true,api_key_ciphertext:row.api_key_ciphertext}];
+    const safe = providers.map((p,i)=>({id:String(p.id||"provider-"+i),name:p.name||`Provider ${i+1}`,baseUrl:p.base_url||p.baseUrl||"",model:p.model||"",proxyUrl:p.proxy_url||p.proxyUrl||"",enabled:p.enabled!==false,apiKeyConfigured:Boolean(p.api_key_ciphertext||p.apiKeyCiphertext)}));
+    return res.json({baseUrl:safe[0]?.baseUrl||"https://api.openai.com/v1",model:safe[0]?.model||"",apiKeyConfigured:Boolean(safe[0]?.apiKeyConfigured||row?.api_key_ciphertext),providers:safe,fallbackEnabled:true});
   } catch (error) { next(error); }
 });
 
 app.put("/api/ai/settings", requireAuth, async (req, res, next) => {
   try {
-    const baseUrl = validateAIBaseUrl(req.body?.baseUrl);
-    const model = String(req.body?.model || "").trim();
-    const apiKey = String(req.body?.apiKey || "").trim();
-    if (!model || model.length > 200) return apiError(res, 400, "Enter a valid model name.");
-    const existing = await getAISettings(req.user.id);
-    let encrypted;
-    if (apiKey) encrypted = encryptSecret(apiKey);
-    else if (existing?.api_key_ciphertext) encrypted = {
-      ciphertext: existing.api_key_ciphertext, iv: existing.api_key_iv, tag: existing.api_key_tag
-    };
-    else return apiError(res, 400, "Enter your API key before saving settings.");
+    const existing=await getAISettings(req.user.id);
+    const savedProviders=Array.isArray(existing?.providers)?existing.providers:[];
+    const incoming=Array.isArray(req.body?.providers)&&req.body.providers.length?req.body.providers:[{id:"primary",name:"Primary",baseUrl:req.body?.baseUrl,model:req.body?.model,apiKey:req.body?.apiKey,proxyUrl:req.body?.proxyUrl,enabled:true}];
+    const providers=[];
+    for(let i=0;i<incoming.length;i++){
+      const p=incoming[i]||{};if(p.enabled===false)continue;
+      const old=savedProviders.find(x=>String(x.id)===String(p.id))||savedProviders.find(x=>(x.base_url||x.baseUrl)===(p.baseUrl||p.base_url)&&(x.name||"")===p.name);
+      const baseUrl=validateAIBaseUrl(p.baseUrl||p.base_url||old?.base_url||"");
+      const model=String(p.model||old?.model||"").trim();
+      if(!model||model.length>200)return apiError(res,400,"Every enabled AI provider needs a valid model name.");
+      const proxyUrl=await validateAIProxyUrl(p.proxyUrl||p.proxy_url||old?.proxy_url||"");
+      let encrypted=null;
+      if(String(p.apiKey||"").trim())encrypted=encryptSecret(String(p.apiKey).trim());
+      else if(old?.api_key_ciphertext)encrypted={ciphertext:old.api_key_ciphertext,iv:old.api_key_iv,tag:old.api_key_tag};
+      else if(i===0&&existing?.api_key_ciphertext)encrypted={ciphertext:existing.api_key_ciphertext,iv:existing.api_key_iv,tag:existing.api_key_tag};
+      if(!encrypted)return apiError(res,400,"Enter an API key for each new provider before saving settings.");
+      providers.push({id:String(p.id||"provider-"+i),name:String(p.name||`Provider ${i+1}`).slice(0,100),base_url:baseUrl,model,proxy_url:proxyUrl,enabled:true,api_key_ciphertext:encrypted.ciphertext,api_key_iv:encrypted.iv,api_key_tag:encrypted.tag});
+    }
+    if(!providers.length)return apiError(res,400,"Add at least one enabled AI provider.");
+    const primary=providers[0];
     await pool.query(
-      `INSERT INTO ai_settings (user_id, base_url, model, api_key_ciphertext, api_key_iv, api_key_tag, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET base_url = EXCLUDED.base_url, model = EXCLUDED.model,
-       api_key_ciphertext = EXCLUDED.api_key_ciphertext, api_key_iv = EXCLUDED.api_key_iv, api_key_tag = EXCLUDED.api_key_tag, updated_at = NOW()`,
-      [req.user.id, baseUrl, model, encrypted.ciphertext, encrypted.iv, encrypted.tag]
+      `INSERT INTO ai_settings (user_id,base_url,model,api_key_ciphertext,api_key_iv,api_key_tag,providers,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())
+       ON CONFLICT (user_id) DO UPDATE SET base_url=EXCLUDED.base_url,model=EXCLUDED.model,
+       api_key_ciphertext=EXCLUDED.api_key_ciphertext,api_key_iv=EXCLUDED.api_key_iv,api_key_tag=EXCLUDED.api_key_tag,
+       providers=EXCLUDED.providers,updated_at=NOW()`,
+      [req.user.id,primary.base_url,primary.model,primary.api_key_ciphertext,primary.api_key_iv,primary.api_key_tag,JSON.stringify(providers)]
     );
-    return res.json({ baseUrl, model, apiKeyConfigured: true, message: "AI settings saved to your account." });
+    return res.json({baseUrl:primary.base_url,model:primary.model,apiKeyConfigured:true,providers:providers.map(p=>({id:p.id,name:p.name,baseUrl:p.base_url,model:p.model,proxyUrl:p.proxy_url,enabled:true,apiKeyConfigured:true})),fallbackEnabled:true,message:"AI settings saved and encrypted to your account."});
   } catch (error) {
-    if (error.status) return apiError(res, error.status, error.message);
-    next(error);
+    if (error.status) return apiError(res,error.status,error.message);
+    return apiError(res,400,error.message||"Could not save AI settings.");
   }
 });
 
 app.post("/api/ai/test", requireAuth, async (req, res, next) => {
   try {
-    const config = await resolveAIConfig(req.user.id, req.body || {}, true);
-    const data = await askAI(config, [{ role: "user", content: "Reply with only: Connected" }]);
-    const reply = data?.choices?.[0]?.message?.content;
-    if (!reply) return apiError(res, 502, "The AI provider returned no assistant message.");
-    return res.json({ ok: true, message: "Connection successful. Your model replied to the test request." });
+    const configs=await resolveAIConfig(req.user.id,req.body||{},true);
+    const result=await askAIWithFallback(configs,[{role:"user",content:"Reply with only: Connected"}]);
+    return res.json({ok:true,providerId:result.providerId,providerName:result.providerName,message:"Connection successful. "+result.providerName+" replied to the test request."});
   } catch (error) {
-    return apiError(res, error.status || 502, error.message || "Could not reach the AI provider.");
+    return apiError(res,error.status||502,error.message||"Could not reach your AI providers.");
   }
 });
 
 app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
   try {
-    const messages = req.body?.messages;
-    if (!Array.isArray(messages) || messages.length < 1 || messages.length > 60) {
-      return apiError(res, 400, "Send between 1 and 60 chat messages.");
+    const messages=req.body?.messages;
+    if(!Array.isArray(messages)||messages.length<1||messages.length>60)return apiError(res,400,"Send between 1 and 60 chat messages.");
+    const safeMessages=[];
+    for(const message of messages){
+      if(!["system","user","assistant"].includes(message?.role)||typeof message?.content!=="string"||message.content.length>20_000)return apiError(res,400,"One or more chat messages are invalid.");
+      safeMessages.push({role:message.role,content:message.content});
     }
-    const safeMessages = [];
-    for (const message of messages) {
-      if (!["system", "user", "assistant"].includes(message?.role) || typeof message?.content !== "string" || message.content.length > 20_000) {
-        return apiError(res, 400, "One or more chat messages are invalid.");
-      }
-      safeMessages.push({ role: message.role, content: message.content });
-    }
-    const config = await resolveAIConfig(req.user.id);
-    const data = await askAI(config, safeMessages);
-    const answer = data?.choices?.[0]?.message?.content;
-    if (!answer) return apiError(res, 502, "The AI provider returned no assistant message.");
-    return res.json({ content: typeof answer === "string" ? answer : JSON.stringify(answer) });
-  } catch (error) {
-    return apiError(res, error.status || 502, error.message || "Could not reach your AI provider.");
+    const configs=await resolveAIConfig(req.user.id);
+    const result=await askAIWithFallback(configs,safeMessages);
+    const answer=result.data?.choices?.[0]?.message?.content;
+    if(!answer)return apiError(res,502,"The AI provider returned no assistant message.");
+    return res.json({content:typeof answer==="string"?answer:JSON.stringify(answer),providerName:result.providerName});
+  } catch(error) {
+    return apiError(res,error.status||502,error.message||"Could not reach your AI providers.");
   }
 });
 
+app.get("/api/memory", requireAuth, async (req,res,next) => {
+  try {
+    const result=await pool.query("SELECT file_name,content,updated_at FROM user_memory_files WHERE user_id=$1 ORDER BY file_name",[req.user.id]);
+    return res.json({files:Object.fromEntries(result.rows.map(row=>[row.file_name,row.content]))});
+  } catch(error){next(error);}
+});
+app.put("/api/memory", requireAuth, async (req,res,next) => {
+  try {
+    const files=req.body?.files;
+    const allowed=new Set(["profile.md","goals.md","preferences.md","routines.md","planning.md"]);
+    if(!files||typeof files!=="object"||Array.isArray(files))return apiError(res,400,"Send a Markdown files object.");
+    const entries=Object.entries(files);
+    if(entries.length>5||entries.some(([name,content])=>!allowed.has(name)||typeof content!=="string"||content.length>30_000))return apiError(res,400,"Invalid memory filename or content.");
+    for(const [name,content] of entries){
+      await pool.query(`INSERT INTO user_memory_files (user_id,file_name,content,updated_at) VALUES ($1,$2,$3,NOW())
+       ON CONFLICT (user_id,file_name) DO UPDATE SET content=EXCLUDED.content,updated_at=NOW()`,[req.user.id,name,content]);
+    }
+    return res.json({saved:entries.map(([name])=>name),message:"Memory Markdown files saved to your account."});
+  } catch(error){next(error);}
+});
 app.use((err, _req, res, _next) => {
   const status = Number(err.status) || 500;
   if (status >= 500) console.error("Smart Calendar API error:", err.message);
