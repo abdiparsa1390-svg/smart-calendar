@@ -475,6 +475,13 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
   }
 });
 
+app.use((err, _req, res, _next) => {
+  const status = Number(err.status) || 500;
+  if (status >= 500) console.error("Smart Calendar API error:", err.message);
+  if (res.headersSent) return;
+  return apiError(res, status, status >= 500 ? "The server could not complete this request." : err.message);
+});
+
 const schema = await readFile(path.join(__dirname, "schema.sql"), "utf8");
 await pool.query(schema);
 const server = app.listen(port, () => {
@@ -492,9 +499,3 @@ async function shutdown() {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
-app.use((err, _req, res, _next) => {
-  const status = Number(err.status) || 500;
-  if (status >= 500) console.error("Smart Calendar API error:", err.message);
-  if (res.headersSent) return;
-  return apiError(res, status, status >= 500 ? "The server could not complete this request." : err.message);
-});
