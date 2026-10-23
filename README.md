@@ -55,4 +55,16 @@ npm pack
 
 npm pack runs the prepack script, builds the frontend in local mode, and creates a .tgz package. Before the first public release, the publisher must have an npm account, confirm the unscoped name smart-calendar is available, and publish the package. It is not available through npm install -g until that publishing step is done.
 
+
+## Publish a public npm release
+
+The repository includes a manual GitHub Actions workflow named **Publish Smart Calendar to npm**. To use it:
+
+1. Create or sign in to your npm account and verify that the unscoped package name **smart-calendar** is available. If another publisher already owns that name, choose another package name before publishing.
+2. Create an npm access token permitted to publish packages. Add it to GitHub under **Settings → Secrets and variables → Actions** as a repository secret named **NPM_TOKEN**.
+3. Open **Actions → Publish Smart Calendar to npm → Run workflow**, type **PUBLISH** in the confirmation field, and run it.
+4. After the first successful publish, users can run npm install -g smart-calendar and then smart-calendar.
+
+Publishing version 0.1.0 can happen only once. For later releases, update the version in package.json before publishing again. Do not commit the NPM_TOKEN or any AI provider keys to the repository.
+
 Repository: https://github.com/abdiparsa1390-svg/smart-calendar
