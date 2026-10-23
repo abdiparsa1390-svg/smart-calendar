@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./enhancements.css";
 import AuthGate from "./AuthGate.jsx";
 import SetupWizard from "./SetupWizard.jsx";
+import LanguageGate from "./LanguageGate.jsx";
 import { API_AVAILABLE, LOCAL_MODE, apiFetch } from "./api.js";
 import {
   ArrowRight, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight,
@@ -131,6 +132,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authNotice, setAuthNotice] = useState("");
   const [language, setLanguage] = useState(() => { try { return localStorage.getItem("smart-calendar-language") || "en"; } catch { return "en"; } });
+  const [languageChosen, setLanguageChosen] = useState(() => { try { return Boolean(localStorage.getItem("smart-calendar-language")); } catch { return false; } });
   const [setupComplete, setSetupComplete] = useState(() => { try { return localStorage.getItem("smart-calendar-setup-complete") === "yes"; } catch { return false; } });
   const [setupJustDone, setSetupJustDone] = useState(false);
   const [aiProviders, setAiProviders] = useState([]);
@@ -788,6 +790,7 @@ export default function App() {
     }
     if (result?.action === "complete") {
       setLanguage(result.language || "en");
+      setLanguageChosen(true);
       setSetupComplete(true);
       setSetupJustDone(true);
       setConfig(result.config || blankConfig);
@@ -799,6 +802,13 @@ export default function App() {
     }
   }
 
+  if (!languageChosen && !setupComplete) {
+    return <LanguageGate onChoose={value => {
+      try { localStorage.setItem("smart-calendar-language", value); } catch {}
+      setLanguage(value);
+      setLanguageChosen(true);
+    }} />;
+  }
   if (authStatus !== "authenticated" || !user) {
     return <AuthGate status={authStatus} message={authNotice} onMessage={setAuthNotice} onAuthenticated={establishSession} />;
   }
