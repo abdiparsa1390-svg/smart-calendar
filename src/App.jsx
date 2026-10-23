@@ -642,6 +642,7 @@ export default function App() {
       setTestMessage("Add your Base URL, API key, and model to start chatting.");
       return;
     }
+    setSetupJustDone(false);
     const outgoing = { id: crypto.randomUUID(), role: "user", content };
     const history = [...messages, outgoing];
     setMessages(history);
@@ -786,7 +787,7 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className="app-shell" lang={language} dir={language === "fa" ? "rtl" : "ltr"}>
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><CalendarDays size={21} /></div><span>smart<span className="brand-light">calendar</span></span><span className="beta-tag">BETA</span></div>
         <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><span className="account-email" title={LOCAL_MODE ? "Data stays on this computer" : user.email}>{LOCAL_MODE ? "Local workspace" : user.email}</span><IconButton title={language === "fa" ? "امنیت و حریم خصوصی" : "Security and privacy"} onClick={() => setShowSecurityInfo(true)}><LockKeyhole size={18} /></IconButton><IconButton title={language === "fa" ? "راهنمای راه‌اندازی" : "Setup guide"} onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton>{!LOCAL_MODE && <button type="button" className="account-signout" onClick={handleSignOut}>Sign out</button>}<div className="avatar">{LOCAL_MODE ? "L" : user.email.slice(0, 1).toUpperCase()}</div></div>
@@ -797,7 +798,7 @@ export default function App() {
         <button className={mobilePanel === "assistant" ? "active" : ""} onClick={() => setMobilePanel("assistant")}><Sparkles size={16} /> AI assistant</button>
       </div>
 
-      <section className="workspace">
+      <section className={"workspace" + (setupJustDone ? " workspace-expanded" : "")}>
         <section className={"calendar-panel " + (mobilePanel === "assistant" ? "mobile-hidden" : "")}>
           <div className="calendar-toolbar">
             <button className="create-button" onClick={() => openNewEvent()}><Plus size={18} /> Create</button>
