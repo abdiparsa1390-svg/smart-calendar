@@ -48,3 +48,37 @@
 .account-signout:hover{border-color:#c8c9ef;background:#f8f8ff;color:#6264c2}
 @media(max-width:900px){.account-email{max-width:115px}.account-signout{padding:6px 8px}}
 @media(max-width:580px){.account-email{display:none}.account-signout{font-size:9px;padding:6px}}
+
+
+/* Onboarding extensions: review first, apply only after explicit user approval. */
+.approval-card{margin:10px 14px 14px;border:1px solid #dfe2f0;border-radius:14px;background:#fff;box-shadow:0 6px 22px #33345a0b;padding:13px;max-width:100%;overflow:hidden}
+.approval-card-heading{display:flex;align-items:flex-start;gap:9px;color:#686bc9;margin-bottom:9px}
+.approval-card-heading>div{min-width:0;display:grid;gap:3px}
+.approval-card-heading strong{font-size:12px;color:#343650}
+.approval-card-heading span{font-size:10px;line-height:1.5;color:#8a8da2;overflow-wrap:anywhere}
+.approval-proposal-list{display:grid;gap:7px;max-height:220px;overflow:auto}
+.approval-proposal{padding:9px 10px;border:1px solid #ececf4;border-radius:9px;background:#fbfbfe;display:grid;gap:4px}
+.approval-proposal strong{font-size:11px;color:#383a54}
+.approval-proposal small,.approval-proposal p{font-size:10px;line-height:1.5;color:#777b91;margin:0;overflow-wrap:anywhere}
+.approval-action{font-size:8px;font-weight:800;color:#7375c7;letter-spacing:.9px}
+.approval-note{display:flex;align-items:flex-start;gap:6px;font-size:9px;line-height:1.6;color:#82869a;margin:10px 0}
+.approval-note svg{flex:none;margin-top:1px;color:#43977f}
+.approval-buttons{display:flex;justify-content:flex-end;gap:7px}
+.approval-buttons .primary-button,.approval-buttons .secondary-button{font-size:10px;min-height:34px;padding:7px 10px}
+.memory-approval pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:170px;overflow:auto;padding:10px;border:1px solid #ececf4;border-radius:9px;background:#fafbfe;color:#5e637b;font-size:10px;line-height:1.65}
+.settings-backups{border:1px solid #e6e7f1;border-radius:12px;padding:12px;background:#fcfcff;display:grid;gap:10px}
+.settings-backups-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.settings-backups-heading strong{font-size:12px;color:#383a55}
+.settings-backups-heading p{font-size:10px;line-height:1.6;color:#85889d;margin:4px 0 0}
+.settings-backups-heading .secondary-button{min-height:32px;font-size:10px;padding:6px 9px;white-space:nowrap}
+.settings-backup-card{display:grid;grid-template-columns:1fr 1fr;gap:10px;border:1px solid #e5e6f0;border-radius:10px;padding:11px;background:#fff}
+.settings-backup-card .settings-backup-title{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#454862}
+.settings-backup-title button{background:transparent;border:0;color:#c25c69;font-size:10px;font-weight:700}
+.settings-backup-card label{display:grid;gap:5px;font-size:10px;color:#737791}
+.settings-backup-card input:not([type=checkbox]){width:100%;min-width:0;border:1px solid #e2e4ee;border-radius:8px;padding:9px;font-size:11px}
+.settings-backup-card .backup-enabled{display:flex;align-items:center;gap:7px;grid-column:1/-1}
+.settings-backup-card .backup-enabled input{accent-color:#686bd0}
+.security-info-modal .security-note{margin-bottom:9px}
+.assistant-panel-expanded{min-width:0}
+@media(min-width:1180px){.workspace.workspace-expanded{grid-template-columns:minmax(0,1fr) minmax(390px,.82fr)}.workspace-expanded .assistant-panel{min-width:390px}.assistant-panel-expanded .chat-area{min-height:420px}}
+@media(max-width:620px){.settings-backup-card{grid-template-columns:1fr}.settings-backup-card .settings-backup-title,.settings-backup-card .backup-enabled{grid-column:1}.approval-card{margin:8px;padding:11px}.settings-backups-heading{align-items:flex-start;flex-direction:column}.settings-backups-heading .secondary-button{align-self:flex-start}}
