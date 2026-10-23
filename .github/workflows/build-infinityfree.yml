@@ -65,13 +65,11 @@ jobs:
           cp -R infinityfree/api/. dist/api/
           cp infinityfree/.htaccess dist/.htaccess
           cp DEPLOY_INFINITYFREE.md dist/README-INFINITYFREE.txt
-          cd dist
-          zip -r ../smart-calendar-infinityfree.zip .
 
       - name: Upload InfinityFree-ready ZIP
         uses: actions/upload-artifact@v4
         with:
           name: smart-calendar-infinityfree
-          path: smart-calendar-infinityfree.zip
+          path: dist/
           if-no-files-found: error
           retention-days: 30
