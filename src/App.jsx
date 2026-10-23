@@ -666,7 +666,7 @@ export default function App() {
       const rawAnswer = data?.content;
       if (!rawAnswer) throw new Error("The API response did not include an assistant message.");
       let answer = typeof rawAnswer === "string" ? rawAnswer : JSON.stringify(rawAnswer);
-      const calendarMatch = answer.match(/<calendar_proposal>([\\s\\S]*?)<\\/calendar_proposal>/i);
+      const calendarMatch = answer.match(/<calendar_proposal>([\s\S]*?)<\/calendar_proposal>/i);
       if (calendarMatch) {
         try {
           const proposal = JSON.parse(calendarMatch[1].trim());
@@ -674,7 +674,7 @@ export default function App() {
           answer = answer.replace(calendarMatch[0], "").trim();
         } catch { /* Show malformed proposal text so the user can ask the assistant to restate it. */ }
       }
-      const memoryMatch = answer.match(/<memory_proposal>([\\s\\S]*?)<\\/memory_proposal>/i);
+      const memoryMatch = answer.match(/<memory_proposal>([\s\S]*?)<\/memory_proposal>/i);
       if (memoryMatch) {
         try {
           const proposal = JSON.parse(memoryMatch[1].trim());
