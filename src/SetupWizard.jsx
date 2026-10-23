@@ -53,7 +53,7 @@ const labels = {
 const memoryFiles = ["profile.md", "goals.md", "preferences.md", "routines.md", "planning.md"];
 
 export default function SetupWizard({
-  accessToken, googleError, googleSdkReady, startGoogleConnect, initialSetupComplete,
+  accessToken, googleVerified, googleError, googleSdkReady, startGoogleConnect, initialSetupComplete,
   onComplete, onResume
 }) {
   const savedLanguage = (() => { try { return localStorage.getItem("smart-calendar-language") || ""; } catch { return ""; } })();
@@ -235,9 +235,9 @@ export default function SetupWizard({
       </div>}
       {stage === 1 && <div className="setup-stage">
         <div className="setup-icon"><CalendarDays size={27}/></div><p className="setup-eyebrow">{t.step} 1 / 3</p><h1>{t.googleTitle}</h1><p className="setup-subtitle">{t.googleSub}</p>
-        <div className={"setup-check-row " + (accessToken ? "ready" : "")}><span className="setup-check">{accessToken ? <Check size={18}/> : <CalendarDays size={18}/>}</span><div><strong>{accessToken ? t.connected : t.needGoogle}</strong><p>{accessToken ? (language === "fa" ? "اتصال گوگل تا پایان نشست در حافظه نگه داشته می‌شود." : "Google access stays in memory for this session.") : (language === "fa" ? "پنجرهٔ رسمی مجوز گوگل باز می‌شود." : "The official Google authorization window will open.")}</p></div></div>
+        <div className={"setup-check-row " + (googleVerified ? "ready" : "")}><span className="setup-check">{googleVerified ? <Check size={18}/> : <CalendarDays size={18}/>}</span><div><strong>{googleVerified ? t.connected : (accessToken ? (language === "fa" ? "در حال بررسی دسترسی به تقویم گوگل…" : "Verifying Google Calendar access…") : t.needGoogle)}</strong><p>{googleVerified ? (language === "fa" ? "اتصال گوگل در این نشست تأیید شد." : "Google Calendar access was verified for this session.") : (language === "fa" ? "پنجرهٔ رسمی مجوز گوگل باز می‌شود؛ سپس دسترسی تقویم بررسی می‌شود." : "Authorize with Google; the app will then verify Calendar API access.")}</p></div></div>
         {googleError && <div className="setup-error"><CircleHelp size={17}/><span>{googleError}{!accessToken && !String(googleError).includes("cancel") && !GOOGLE_CLIENT_ID ? " " + t.noClient : ""}</span></div>}
-        <div className="setup-actions"><button type="button" className="setup-secondary" onClick={() => setStage(0)}><ArrowLeft size={16}/>{t.back}</button><button type="button" className="setup-secondary" onClick={startGoogleConnect} disabled={!googleSdkReady || Boolean(accessToken)}><CalendarDays size={16}/>{accessToken ? t.connected : t.connectGoogle}</button><button type="button" className="setup-primary" onClick={() => setStage(2)} disabled={!accessToken}>{t.next}<ArrowRight size={16}/></button></div>
+        <div className="setup-actions"><button type="button" className="setup-secondary" onClick={() => setStage(0)}><ArrowLeft size={16}/>{t.back}</button><button type="button" className="setup-secondary" onClick={startGoogleConnect} disabled={!googleSdkReady || Boolean(accessToken)}><CalendarDays size={16}/>{accessToken ? t.connected : t.connectGoogle}</button><button type="button" className="setup-primary" onClick={() => setStage(2)} disabled={!googleVerified}>{t.next}<ArrowRight size={16}/></button></div>
       </div>}
       {stage === 2 && <div className="setup-stage">
         <div className="setup-icon"><Sparkles size={27}/></div><p className="setup-eyebrow">{t.step} 2 / 3</p><h1>{t.aiTitle}</h1><p className="setup-subtitle">{t.aiSub}</p>
