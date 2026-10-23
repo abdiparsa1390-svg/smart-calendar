@@ -1,0 +1,358 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowRight, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight,
+  CircleHelp, Clock3, Eye, EyeOff, ListTodo, MessageSquare, MoreHorizontal,
+  Plus, RefreshCw, Send, Settings2, ShieldCheck, Sparkles, X, Zap
+} from "lucide-react";
+
+const HOURS = Array.from({ length: 13 }, (_, i) => i + 7);
+const CONFIG_KEY = "smart-calendar-ai-config-v1";
+const EVENTS_KEY = "smart-calendar-events-v1";
+const COLORS = ["#6d72d9", "#24a79b", "#e39c4c", "#de718d", "#6298dd"];
+const blankConfig = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "" };
+
+function loadConfig() {
+  try {
+    const saved = localStorage.getItem(CONFIG_KEY);
+    return saved ? { ...blankConfig, ...JSON.parse(saved) } : blankConfig;
+  } catch {
+    return blankConfig;
+  }
+}
+function dayKey(date) {
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+}
+function startOfWeek(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+function sameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+function dateText(date, options = { month: "short", day: "numeric" }) {
+  return new Intl.DateTimeFormat("en-US", options).format(date);
+}
+function timeText(date) {
+  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(":00", "");
+}
+function dateAt(base, offset, hour, minute = 0) {
+  const d = new Date(base);
+  d.setDate(d.getDate() + offset);
+  d.setHours(hour, minute, 0, 0);
+  return d;
+}
+function seedEvents() {
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  monday.setHours(0, 0, 0, 0);
+  const samples = [
+    [0, 9, 0, 10, 0, "Weekly planning", COLORS[0], "Focus time"],
+    [1, 10, 30, 12, 0, "Deep work session", COLORS[1], "Heads down"],
+    [2, 13, 0, 14, 0, "Project check-in", COLORS[2], "Team room"],
+    [3, 9, 30, 10, 30, "Read & research", COLORS[3], "Focus time"],
+    [4, 15, 0, 16, 0, "Weekly review", COLORS[4], "Wrap up"]
+  ];
+  return samples.map((s, i) => ({ id: "sample-" + i, start: dateAt(monday, s[0], s[1], s[2]), end: dateAt(monday, s[0], s[3], s[4]), title: s[5], color: s[6], place: s[7] }));
+}
+function loadEvents() {
+  try {
+    const saved = localStorage.getItem(EVENTS_KEY);
+    if (saved) return JSON.parse(saved).map(e => ({ ...e, start: new Date(e.start), end: new Date(e.end) }));
+  } catch { /* Use demo events when no local calendar can be loaded. */ }
+  return seedEvents();
+}
+function endpointFor(baseUrl) {
+  const base = baseUrl.trim().replace(/\/+$/, "");
+  return /\/chat\/completions$/i.test(base) ? base : base + "/chat/completions";
+}
+function IconButton({ title, onClick, children }) {
+  return <button className="icon-button" type="button" title={title} aria-label={title} onClick={onClick}>{children}</button>;
+}
+
+export default function App() {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [view, setView] = useState("week");
+  const [events, setEvents] = useState(loadEvents);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [config, setConfig] = useState(loadConfig);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [testState, setTestState] = useState("idle");
+  const [testMessage, setTestMessage] = useState("");
+  const [messages, setMessages] = useState([{ id: "welcome", role: "assistant", content: "Hey! I’m your calendar sidekick. ☀️\n\nI’m ready to help you think through your schedule. Connect an OpenAI-compatible model in settings to get started." }]);
+  const [chatInput, setChatInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState("calendar");
+  const [toast, setToast] = useState("");
+  const [draft, setDraft] = useState({ title: "", date: dayKey(new Date()), start: "09:00", end: "10:00", color: COLORS[0], place: "" });
+  const chatEndRef = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events)); } catch { /* Browser storage can be unavailable. */ }
+  }, [events]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, sending]);
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(""), 2600);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const visibleDays = useMemo(() => {
+    if (view === "day") return [new Date(currentDate)];
+    if (view === "month") {
+      const first = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      const begin = startOfWeek(first);
+      return Array.from({ length: 42 }, (_, i) => {
+        const d = new Date(begin);
+        d.setDate(begin.getDate() + i);
+        return d;
+      });
+    }
+    const begin = startOfWeek(currentDate);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(begin);
+      d.setDate(begin.getDate() + i);
+      return d;
+    });
+  }, [currentDate, view]);
+
+  const rangeLabel = useMemo(() => {
+    if (view === "day") return dateText(currentDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    if (view === "month") return dateText(currentDate, { month: "long", year: "numeric" });
+    const first = visibleDays[0];
+    const last = visibleDays[6];
+    if (first.getMonth() === last.getMonth()) return dateText(first, { month: "long", year: "numeric" });
+    return dateText(first, { month: "short", day: "numeric" }) + " – " + dateText(last, { month: "short", day: "numeric", year: "numeric" });
+  }, [currentDate, view, visibleDays]);
+
+  const isConfigured = Boolean(config.baseUrl.trim() && config.apiKey.trim() && config.model.trim());
+
+  function navigate(direction) {
+    setCurrentDate(prev => {
+      const next = new Date(prev);
+      if (view === "day") next.setDate(next.getDate() + direction);
+      else if (view === "month") next.setMonth(next.getMonth() + direction);
+      else next.setDate(next.getDate() + direction * 7);
+      return next;
+    });
+  }
+  function openNewEvent(date = currentDate, hour = 9) {
+    setDraft({ title: "", date: dayKey(date), start: String(hour).padStart(2, "0") + ":00", end: String(Math.min(hour + 1, 23)).padStart(2, "0") + ":00", color: COLORS[0], place: "" });
+    setShowEventModal(true);
+  }
+  function saveEvent(e) {
+    e.preventDefault();
+    if (!draft.title.trim()) return;
+    const parts = draft.date.split("-").map(Number);
+    const s = draft.start.split(":").map(Number);
+    const t = draft.end.split(":").map(Number);
+    const start = new Date(parts[0], parts[1] - 1, parts[2], s[0], s[1]);
+    const end = new Date(parts[0], parts[1] - 1, parts[2], t[0], t[1]);
+    if (end <= start) { setToast("End time must be after start time."); return; }
+    setEvents(prev => [...prev, { ...draft, id: crypto.randomUUID(), title: draft.title.trim(), start, end }]);
+    setCurrentDate(start);
+    setView("week");
+    setShowEventModal(false);
+    setToast("Event added to your calendar");
+  }
+  function saveConfig(e) {
+    e.preventDefault();
+    try {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+      setTestMessage("Settings saved in this browser.");
+      setTestState("success");
+      setShowSettings(false);
+      setToast("AI settings saved");
+    } catch {
+      setTestState("error");
+      setTestMessage("Could not save settings in this browser.");
+    }
+  }
+  async function testConnection(e) {
+    e.preventDefault();
+    setTestState("testing");
+    setTestMessage("");
+    if (!config.baseUrl.trim() || !config.apiKey.trim() || !config.model.trim()) {
+      setTestState("error");
+      setTestMessage("Enter the Base URL, API key, and model first.");
+      return;
+    }
+    try {
+      const response = await fetch(endpointFor(config.baseUrl), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + config.apiKey.trim() },
+        body: JSON.stringify({ model: config.model.trim(), messages: [{ role: "user", content: "Reply with only: Connected" }], max_tokens: 12 })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error?.message || data?.message || "Request failed with status " + response.status);
+      setTestState("success");
+      setTestMessage("Connection successful. Your model replied to the test request.");
+    } catch (error) {
+      setTestState("error");
+      setTestMessage(error.message || "Could not connect. Check the URL, model, key, and provider CORS settings.");
+    }
+  }
+  async function sendMessage(e) {
+    e?.preventDefault();
+    const content = chatInput.trim();
+    if (!content || sending) return;
+    if (!isConfigured) {
+      setShowSettings(true);
+      setTestState("error");
+      setTestMessage("Add your Base URL, API key, and model to start chatting.");
+      return;
+    }
+    const outgoing = { id: crypto.randomUUID(), role: "user", content };
+    const history = [...messages, outgoing];
+    setMessages(history);
+    setChatInput("");
+    setSending(true);
+    try {
+      const response = await fetch(endpointFor(config.baseUrl), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + config.apiKey.trim() },
+        body: JSON.stringify({
+          model: config.model.trim(),
+          messages: [
+            { role: "system", content: "You are the friendly AI assistant in Smart Calendar. For now, discuss scheduling and planning in chat, but you do not have calendar-editing tools. Never claim to have changed calendar events." },
+            ...history.filter(m => m.role === "user" || m.role === "assistant").map(m => ({ role: m.role, content: m.content }))
+          ],
+          temperature: 0.7
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error?.message || data?.message || "Request failed with status " + response.status);
+      const answer = data?.choices?.[0]?.message?.content;
+      if (!answer) throw new Error("The API response did not include an assistant message.");
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", content: typeof answer === "string" ? answer : JSON.stringify(answer) }]);
+    } catch (error) {
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", isError: true, content: "I couldn’t reach your model. " + (error.message || "Check your connection settings and try again.") }]);
+    } finally { setSending(false); }
+  }
+
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="brand"><div className="brand-mark"><CalendarDays size={21} /></div><span>smart<span className="brand-light">calendar</span></span><span className="beta-tag">BETA</span></div>
+        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><IconButton title="Help"><CircleHelp size={19} /></IconButton><div className="avatar">SC</div></div>
+      </header>
+
+      <div className="mobile-switch">
+        <button className={mobilePanel === "calendar" ? "active" : ""} onClick={() => setMobilePanel("calendar")}><CalendarDays size={16} /> Calendar</button>
+        <button className={mobilePanel === "assistant" ? "active" : ""} onClick={() => setMobilePanel("assistant")}><Sparkles size={16} /> AI assistant</button>
+      </div>
+
+      <section className="workspace">
+        <section className={"calendar-panel " + (mobilePanel === "assistant" ? "mobile-hidden" : "")}>
+          <div className="calendar-toolbar">
+            <button className="create-button" onClick={() => openNewEvent()}><Plus size={18} /> Create</button>
+            <div className="date-navigation">
+              <button className="today-button" onClick={() => setCurrentDate(new Date())}>Today</button>
+              <IconButton title="Previous" onClick={() => navigate(-1)}><ChevronLeft size={19} /></IconButton>
+              <IconButton title="Next" onClick={() => navigate(1)}><ChevronRight size={19} /></IconButton>
+              <h1>{rangeLabel}</h1>
+            </div>
+            <div className="view-picker">{["day", "week", "month"].map(option => <button key={option} className={view === option ? "selected" : ""} onClick={() => setView(option)}>{option[0].toUpperCase() + option.slice(1)}</button>)}<IconButton title="Calendar options"><MoreHorizontal size={20} /></IconButton></div>
+          </div>
+          <div className="calendar-subbar">
+            <div className="calendar-caption"><span className="tiny-calendar"><CalendarDays size={14} /></span> My calendar <ChevronDown size={14} /></div>
+            <div className="calendar-caption muted-caption"><span className="legend-dot" /> Personal <span className="legend-dot teal" /> Focus time</div>
+          </div>
+
+          {view === "month" ? (
+            <div className="month-view">
+              <div className="month-weekdays">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d}>{d}</div>)}</div>
+              <div className="month-cells">{visibleDays.map(day => {
+                const dayEvents = events.filter(event => sameDay(event.start, day));
+                return <button key={dayKey(day)} className={"month-cell " + (day.getMonth() !== currentDate.getMonth() ? "outside-month " : "") + (sameDay(day, new Date()) ? "is-today" : "")} onClick={() => { setCurrentDate(day); setView("day"); }}>
+                  <span className="month-number">{day.getDate()}</span>
+                  {dayEvents.slice(0, 3).map(event => <span key={event.id} className="month-event" style={{ "--event-color": event.color }}>{event.title}</span>)}
+                  {dayEvents.length > 3 && <span className="more-events">+{dayEvents.length - 3} more</span>}
+                </button>;
+              })}</div>
+            </div>
+          ) : (
+            <div className="calendar-scroll">
+              <div className="week-header" style={{ gridTemplateColumns: "60px repeat(" + visibleDays.length + ", minmax(104px, 1fr))" }}>
+                <div className="time-corner"><Clock3 size={15} /></div>
+                {visibleDays.map(day => <div key={dayKey(day)} className={"day-heading " + (sameDay(day, new Date()) ? "is-today" : "")}><span>{dateText(day, { weekday: "short" }).toUpperCase()}</span><strong>{day.getDate()}</strong></div>)}
+              </div>
+              <div className="time-grid" style={{ gridTemplateColumns: "60px repeat(" + visibleDays.length + ", minmax(104px, 1fr))" }}>
+                <div className="time-rail">{HOURS.map(hour => <div key={hour} className="time-label">{timeText(dateAt(new Date(), 0, hour))}</div>)}</div>
+                {visibleDays.map(day => <div key={dayKey(day)} className={"day-track " + (sameDay(day, new Date()) ? "today-track" : "")}>
+                  {HOURS.map(hour => <button key={hour} className="hour-slot" aria-label={"Add event on " + dateText(day) + " at " + timeText(dateAt(new Date(), 0, hour))} onClick={() => openNewEvent(day, hour)} />)}
+                  {events.filter(event => sameDay(event.start, day)).map(event => {
+                    const startMinutes = event.start.getHours() * 60 + event.start.getMinutes();
+                    const endMinutes = event.end.getHours() * 60 + event.end.getMinutes();
+                    const top = ((startMinutes - 7 * 60) / 60) * 64;
+                    const height = Math.max(30, ((endMinutes - startMinutes) / 60) * 64 - 3);
+                    if (top < 0 || top >= HOURS.length * 64) return null;
+                    return <button key={event.id} className="calendar-event" style={{ top: (top + 2) + "px", height: Math.min(height, HOURS.length * 64 - top - 3) + "px", "--event-color": event.color }} onClick={() => setToast(event.title + " · " + timeText(event.start) + "–" + timeText(event.end))}>
+                      <strong>{event.title}</strong><span>{timeText(event.start)} – {timeText(event.end)}</span>
+                    </button>;
+                  })}
+                </div>)}
+              </div>
+            </div>
+          )}
+          <div className="calendar-footer"><span><span className="sync-dot" /> All changes saved locally</span><span>Local time · Your timezone</span></div>
+        </section>
+
+        <aside className={"assistant-panel " + (mobilePanel === "calendar" ? "mobile-hidden" : "")}>
+          <div className="assistant-header">
+            <div className="assistant-title"><div className="assistant-icon"><Sparkles size={19} /></div><div><h2>AI assistant</h2><p>Your planning partner</p></div></div>
+            <div className="assistant-actions"><span className={"connection-indicator " + (isConfigured ? "connected" : "")} title={isConfigured ? "Model settings filled in" : "Model not configured"} /><IconButton title="AI settings" onClick={() => { setTestMessage(""); setTestState("idle"); setShowSettings(true); }}><Settings2 size={18} /></IconButton><IconButton title="New conversation" onClick={() => setMessages([{ id: crypto.randomUUID(), role: "assistant", content: "Fresh page, fresh thoughts. What would you like to plan?" }])}><Plus size={18} /></IconButton></div>
+          </div>
+          <div className="assistant-context"><div className="context-icon"><Zap size={16} /></div><div><strong>A little more intentional</strong><span>Make room for what matters today.</span></div><ArrowRight size={16} className="context-arrow" /></div>
+          <div className="chat-area">
+            <div className="chat-day-label"><span /> TODAY <span /></div>
+            {messages.map(message => <div key={message.id} className={"message-row " + (message.role === "user" ? "user-row" : "")}>
+              {message.role === "assistant" && <div className="message-avatar"><Sparkles size={14} /></div>}
+              <div className={"message-bubble " + (message.role === "user" ? "user-bubble" : "assistant-bubble") + (message.isError ? " error-bubble" : "")}>{message.content.split("\n").map((line, i) => line ? <p key={i}>{line}</p> : <div key={i} className="message-space" />)}</div>
+            </div>)}
+            {sending && <div className="message-row"><div className="message-avatar"><Sparkles size={14} /></div><div className="message-bubble assistant-bubble typing"><span /><span /><span /></div></div>}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="suggestion-list"><button onClick={() => setChatInput("Help me plan a focused, balanced day.")}><Sparkles size={14} /> Plan my day</button><button onClick={() => setChatInput("How can I make time for deep work?")}><Clock3 size={14} /> Find focus time</button></div>
+          <form className="chat-composer" onSubmit={sendMessage}>
+            <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Ask anything about your schedule…" rows={2} aria-label="Message the AI assistant" />
+            <div className="composer-bottom"><span><ShieldCheck size={13} /> Your model, your choice</span><button className="send-button" type="submit" disabled={!chatInput.trim() || sending} aria-label="Send message">{sending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}</button></div>
+          </form>
+          <p className="assistant-footnote">AI can make mistakes. Review important plans.</p>
+        </aside>
+      </section>
+
+      {showSettings && <div className="modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setShowSettings(false); }}>
+        <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <div className="modal-header"><div className="modal-heading-icon"><Bot size={20} /></div><div><h2 id="settings-title">Connect your AI model</h2><p>Use any provider with an OpenAI-compatible chat completions API.</p></div><IconButton title="Close settings" onClick={() => setShowSettings(false)}><X size={19} /></IconButton></div>
+          <form onSubmit={saveConfig} className="settings-form">
+            <label>Base URL <span>Required</span><input value={config.baseUrl} onChange={e => setConfig(p => ({ ...p, baseUrl: e.target.value }))} placeholder="https://api.openai.com/v1" autoComplete="url" required /><small>Enter the provider base URL; /chat/completions is added automatically.</small></label>
+            <label>API key <span>Secret</span><div className="secret-input"><input type={showApiKey ? "text" : "password"} value={config.apiKey} onChange={e => setConfig(p => ({ ...p, apiKey: e.target.value }))} placeholder="sk-..." autoComplete="off" required /><IconButton title={showApiKey ? "Hide API key" : "Show API key"} onClick={() => setShowApiKey(v => !v)}>{showApiKey ? <EyeOff size={17} /> : <Eye size={17} />}</IconButton></div><small>Stored in this browser for this prototype only.</small></label>
+            <label>Model name <span>Required</span><input value={config.model} onChange={e => setConfig(p => ({ ...p, model: e.target.value }))} placeholder="e.g. gpt-4o-mini" autoComplete="off" required /><small>Use the exact model ID supported by your provider.</small></label>
+            {testMessage && <div className={"test-message " + (testState === "error" ? "test-error" : testState === "success" ? "test-success" : "")}>{testState === "success" ? <Check size={16} /> : testState === "error" ? <CircleHelp size={16} /> : <MessageSquare size={16} />}<span>{testMessage}</span></div>}
+            <div className="security-note"><ShieldCheck size={17} /><span><strong>Local prototype</strong> — settings stay in this browser. For a public production site, move API calls to a server so keys aren't exposed in browser code.</span></div>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={testConnection} disabled={testState === "testing"}>{testState === "testing" ? <RefreshCw size={16} className="spin" /> : <Zap size={16} />} Test connection</button><button type="submit" className="primary-button"><Check size={16} /> Save settings</button></div>
+          </form>
+        </section>
+      </div>}
+
+      {showEventModal && <div className="modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setShowEventModal(false); }}>
+        <section className="event-modal" role="dialog" aria-modal="true" aria-labelledby="event-title">
+          <div className="event-modal-top"><span>NEW EVENT</span><IconButton title="Close event form" onClick={() => setShowEventModal(false)}><X size={19} /></IconButton></div>
+          <form onSubmit={saveEvent} className="event-form">
+            <input id="event-title" className="event-title-input" value={draft.title} onChange={e => setDraft(p => ({ ...p, title: e.target.value }))} placeholder="Add a title" autoFocus required />
+            <label className="event-field"><CalendarDays size={18} /><input type="date" value={draft.date} onChange={e => setDraft(p => ({ ...p, date: e.target.value }))} required /></label>
+            <label className="event-field"><Clock3 size={18} /><div className="event-times"><input type="time" value={draft.start} onChange={e => setDraft(p => ({ ...p, start: e.target.value }))} required /><span>to</span><input type="time" value={draft.end} onChange={e => setDraft(p => ({ ...p, end: e.target.value }))} required /></div></label>
+            <label className="event-field"><ListTodo size={18} /><input value={draft.place} onChange={e => setDraft(p => ({ ...p, place: e.target.value }))} placeholder="Add notes (optional)" /></label>
+            <div className="color-choice"><span>Event color</span>{COLORS.map(color => <button type="button" key={color} aria-label={"Use color " + color} className={draft.color === color ? "color-selected" : ""} style={{ backgroundColor: color }} onClick={() => setDraft(p => ({ ...p, color }))}>{draft.color === color && <Check size={13} />}</button>)}</div>
+            <div className="event-modal-actions"><button type="button" className="secondary-button" onClick={() => setShowEventModal(false)}>Cancel</button><button type="submit" className="primary-button"><Check size={16} /> Save event</button></div>
+          </form>
+        </section>
+      </div>}
+      {toast && <div className="toast"><Check size={16} /> {toast}</div>}
+    </main>
+  );
+}
