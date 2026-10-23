@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, CircleHelp, FileText, Globe2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Sparkles, Trash2, Zap } from "lucide-react";
 import { apiFetch } from "./api.js";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 import "./setup.css";
 
 const newProvider = (index = 0) => ({
@@ -84,7 +85,7 @@ export default function SetupWizard({
       if (!active || !Array.isArray(data.providers) || !data.providers.length) return;
       setProviders(data.providers.map((provider, i) => ({
         id: provider.id || crypto.randomUUID(), name: provider.name || (i ? `Backup ${i + 1}` : "Primary"),
-        baseUrl: provider.baseUrl || "", model: provider.model || "", apiKey: "", proxyUrl: provider.proxyUrl || "", enabled: provider.enabled !== false
+        baseUrl: provider.baseUrl || "", model: provider.model || "", apiKey: "", proxyUrl: provider.proxyUrl || "", enabled: provider.enabled !== false, apiKeyConfigured: Boolean(provider.apiKeyConfigured)
       })));
     }).catch(() => {});
     return () => { active = false; };
@@ -135,7 +136,7 @@ export default function SetupWizard({
       method: "POST",
       body: JSON.stringify({ messages: [
         { role: "system", content: interviewSystem },
-        { role: "user", content: userPrompt },
+        ...(userPrompt ? [{ role: "user", content: userPrompt }] : []),
         ...history.filter(m => !m.hidden).map(m => ({ role: m.role, content: m.content }))
       ] })
     });
@@ -161,7 +162,7 @@ export default function SetupWizard({
     const history = [...messages, userMessage];
     setMessages(history); setChatInput(""); setChatBusy(true); setError("");
     try {
-      const answer = await callInterview(history, language === "fa" ? "به پاسخ کاربر ادامه بده و سؤال بعدی را فقط یک‌به‌یک بپرس." : "Continue the interview based on the latest answer and ask the next single question.");
+      const answer = await callInterview(history, "");
       setMessages(previous => [...previous, { id: crypto.randomUUID(), role: "assistant", content: answer }]);
     } catch (e) {
       setError(e.message || (language === "fa" ? "پاسخ هوش مصنوعی دریافت نشد." : "The assistant reply failed."));
@@ -190,7 +191,7 @@ export default function SetupWizard({
     setSavingAI(true); setError("");
     try {
       await apiFetch("/api/memory", { method: "PUT", body: JSON.stringify({ files: memoryPreview }) });
-      setCompleted(true); setStage(4);
+      setCompleted(true); setStage(5);
     } catch (e) {
       setError(e.message || "Could not save the memory files.");
     } finally { setSavingAI(false); }
@@ -266,14 +267,14 @@ export default function SetupWizard({
         <div className="setup-interview-actions"><span>{language === "fa" ? `${interviewAnswers} پاسخ ثبت‌شده` : `${interviewAnswers} answers shared`}</span><button type="button" className="setup-primary" onClick={makeMemorySummary} disabled={summaryBusy || interviewAnswers < 1}>{summaryBusy ? <><RefreshCw size={16} className="setup-spin"/>{t.preparing}</> : <><FileText size={16}/>{t.createSummary}</>}</button></div>
         {error && <div className="setup-error"><CircleHelp size={17}/>{error}</div>}
       </div>}
-      {stage === 4 && memoryPreview && <div className="setup-stage">
+      {stage === 4 && memoryPreview && !completed && <div className="setup-stage">
         <div className="setup-icon"><FileText size={27}/></div><p className="setup-eyebrow">{t.step} 4 / 4</p><h1>{t.summaryTitle}</h1><p className="setup-subtitle">{t.summarySub}</p>
         <div className="setup-memory-files">{memoryFiles.map(name => <article key={name}><strong><FileText size={15}/>{name}</strong><pre>{memoryPreview[name]}</pre></article>)}</div>
         <label className="setup-approve"><input type="checkbox" checked={memoryApproved} onChange={e => setMemoryApproved(e.target.checked)}/><span>{language === "fa" ? "این اطلاعات را بررسی کردم و ذخیرهٔ آن‌ها در حافظهٔ شخصی را تأیید می‌کنم." : "I reviewed these details and approve saving them to my personal memory."}</span></label>
         {error && <div className="setup-error"><CircleHelp size={17}/>{error}</div>}
         <div className="setup-actions"><button type="button" className="setup-secondary" onClick={() => setStage(3)}><ArrowLeft size={16}/>{t.back}</button><button type="button" className="setup-primary" onClick={approveMemory} disabled={!memoryApproved || savingAI}>{savingAI ? <RefreshCw size={16} className="setup-spin"/> : <Check size={16}/>} {t.approve}</button></div>
       </div>}
-      {completed && stage === 4 && <div className="setup-finish"><div className="setup-finish-icon"><Check size={30}/></div><h2>{t.finish}</h2><p>{t.finalSub}</p><button type="button" className="setup-primary" onClick={completeSetup}>{t.done}<ArrowRight size={17}/></button></div>}
+      {completed && stage === 5 && <div className="setup-finish"><div className="setup-finish-icon"><Check size={30}/></div><h2>{t.finish}</h2><p>{t.finalSub}</p><button type="button" className="setup-primary" onClick={completeSetup}>{t.done}<ArrowRight size={17}/></button></div>}
       <div className="setup-bottom"><ShieldCheck size={14}/><span>{t.lockBody}</span></div>
     </section>
     <div className="setup-footnote">{t.lockTitle} · Smart Calendar</div>
