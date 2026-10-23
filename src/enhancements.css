@@ -32,3 +32,13 @@
 .google-modal .modal-actions{padding-top:2px}
 @media(max-width:900px){.calendar-subbar-right{gap:5px}.google-status-label{display:none}.google-connected-controls{gap:4px}.google-connected-controls button{font-size:9px;padding:6px}.google-connect-button{font-size:9px;padding:7px 8px}}
 @media(max-width:580px){.calendar-subbar-right{margin-left:auto}.calendar-subbar-right .muted-caption{display:none}.google-connected-controls button:last-child{display:none}.google-connect-button{font-size:9px}.google-modal .modal-actions{flex-direction:column-reverse}.google-modal .modal-actions button{width:100%}.event-context-menu{width:210px}}
+
+.google-not-ready,.google-ready-copy{display:flex;align-items:flex-start;gap:11px;padding:14px;border-radius:12px;font-size:11px;line-height:1.6}
+.google-not-ready{background:#fff8ec;border:1px solid #f4e6c9;color:#8d734d}
+.google-not-ready>svg{flex-shrink:0;color:#c28c35;margin-top:2px}
+.google-ready-copy{background:#f0f9f6;border:1px solid #dcefe8;color:#628b80}
+.google-ready-mark{flex-shrink:0;display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:#dff3ec;color:#2e9880}
+.google-not-ready strong,.google-ready-copy strong{display:block;color:#46485e;font-size:12px;margin-bottom:3px}
+.google-not-ready p,.google-ready-copy p{margin:0}
+.google-modal .settings-form{padding-top:20px}
+.google-modal .modal-actions{margin-top:4px}
