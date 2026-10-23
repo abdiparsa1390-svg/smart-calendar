@@ -25,7 +25,9 @@
     "dev:api": "npm --prefix server run dev",
     "dev:all": "concurrently -k \"npm run dev\" \"npm run dev:api\""
   },
-  "dependencies": {},
+  "dependencies": {
+    "undici": "^6.21.3"
+  },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.2.0",
