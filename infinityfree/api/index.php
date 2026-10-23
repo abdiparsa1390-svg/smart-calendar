@@ -60,6 +60,7 @@ session_set_cookie_params([
     'httponly' => true,
     'samesite' => 'Lax'
 ]);
+ini_set('session.gc_maxlifetime', '604800');
 ini_set('session.use_strict_mode', '1');
 ini_set('session.use_only_cookies', '1');
 
@@ -225,7 +226,7 @@ function validateAIBaseUrl(mixed $input): string {
     if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) {
         apiFail(400, 'The Base URL must not contain credentials, query parameters, or fragments.');
     }
-    $host = strtolower(rtrim((string)$parts['host'], '.'));
+    $host = trim(strtolower(rtrim((string)$parts['host'], '.')), '[]');
     if ($host === 'localhost' || str_ends_with($host, '.localhost') || str_ends_with($host, '.local') || $host === 'metadata.google.internal') {
         apiFail(400, 'Private or local network addresses are not allowed.');
     }
