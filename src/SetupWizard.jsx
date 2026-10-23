@@ -17,7 +17,7 @@ const labels = {
     connectGoogle: "Connect Google account", connected: "Google Calendar connected", needGoogle: "Connect Google Calendar to continue.",
     noClient: "The app owner must configure a valid Google OAuth Client ID before Google connection can work. This is not a problem with your Google account.",
     aiTitle: "Connect and test your AI", aiSub: "Add at least one OpenAI-compatible provider. A backup is tried automatically when a provider is rate-limited or unavailable.",
-    provider: "Provider", name: "Name", base: "Base URL", model: "Model ID", key: "API key", proxy: "Optional HTTP/HTTPS proxy URL",
+    provider: "Provider", name: "Name", base: "Base URL", model: "Model ID", key: "API key", proxy: "Proxy URL (optional)", proxyHint: "Leave this blank if your AI provider connects directly. A proxy is not required.",
     addProvider: "Add backup provider", remove: "Remove", test: "Test all providers & save", testing: "Testing each provider…",
     saved: "AI connection tested and settings saved.", security: "Keys are encrypted before being stored by the local app or account server. Never share your API keys.",
     interviewTitle: "Let’s get to know you", interviewSub: "Your AI planning partner will ask about your goals, routines, constraints, and preferences. Nothing is saved to memory until you approve the summary.",
@@ -37,7 +37,7 @@ const labels = {
     connectGoogle: "اتصال حساب گوگل", connected: "تقویم گوگل متصل شد", needGoogle: "برای ادامه باید تقویم گوگل را متصل کنی.",
     noClient: "مالک برنامه باید شناسهٔ معتبر Google OAuth را تنظیم کند. این خطا مربوط به حساب گوگل تو نیست.",
     aiTitle: "اتصال و آزمایش هوش مصنوعی", aiSub: "حداقل یک ارائه‌دهندهٔ سازگار با OpenAI وارد کن. اگر به محدودیت یا خطا بخورد، برنامه به‌ترتیب سراغ ارائه‌دهندهٔ پشتیبان می‌رود.",
-    provider: "ارائه‌دهنده", name: "نام", base: "آدرس پایه", model: "شناسهٔ مدل", key: "کلید API", proxy: "آدرس پروکسی HTTP/HTTPS (اختیاری)",
+    provider: "ارائه‌دهنده", name: "نام", base: "آدرس پایه", model: "شناسهٔ مدل", key: "کلید API", proxy: "آدرس پروکسی (اختیاری)", proxyHint: "اگر سرویس هوش مصنوعی مستقیم وصل می‌شود، این کادر را خالی بگذار؛ پروکسی اجباری نیست.",
     addProvider: "افزودن API پشتیبان", remove: "حذف", test: "آزمایش همه و ذخیره", testing: "در حال آزمایش ارائه‌دهنده‌ها…",
     saved: "اتصال هوش مصنوعی آزمایش و تنظیمات ذخیره شد.", security: "کلیدها پیش از ذخیره‌سازی در برنامهٔ محلی یا سرور حساب رمزگذاری می‌شوند. کلید API را با کسی به اشتراک نگذار.",
     interviewTitle: "بیا با هم آشنا شویم", interviewSub: "هوش مصنوعی دربارهٔ هدف‌ها، عادت‌ها، محدودیت‌ها و ترجیحاتت سؤال می‌پرسد. اطلاعات تا وقتی خلاصه را تأیید نکنی در حافظه ذخیره نمی‌شود.",
@@ -269,7 +269,7 @@ export default function SetupWizard({
             <label>{t.base}<input value={p.baseUrl} onChange={e => patchProvider(p.id, { baseUrl: e.target.value })} placeholder="https://api.openai.com/v1" type="url" required /></label>
             <label>{t.model}<input value={p.model} onChange={e => patchProvider(p.id, { model: e.target.value })} placeholder="e.g. gpt-4o-mini" required /></label>
             <label>{t.key}<input value={p.apiKey} onChange={e => patchProvider(p.id, { apiKey: e.target.value })} placeholder={p.apiKeyConfigured ? (language === "fa" ? "برای حفظ کلید قبلی خالی بگذار" : "Leave empty to keep saved key") : (language === "fa" ? "کلید API" : "Paste API key")} type="password" autoComplete="new-password" required={!p.apiKeyConfigured}/></label>
-            <label>{t.proxy}<input value={p.proxyUrl} onChange={e => patchProvider(p.id, { proxyUrl: e.target.value })} placeholder="http://127.0.0.1:7890" type="url" /></label>
+            <label>{t.proxy}<input value={p.proxyUrl} onChange={e => patchProvider(p.id, { proxyUrl: e.target.value })} placeholder="http://127.0.0.1:7890" type="url" /><small className="setup-field-hint">{t.proxyHint}</small></label>
           </section>)}
         </div>
         <button type="button" className="setup-add-provider" onClick={() => setProviders(old => [...old, newProvider(old.length)])}><Plus size={16}/>{t.addProvider}</button>
