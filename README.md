@@ -1,6 +1,6 @@
 # Smart Calendar
 
-A local-first calendar with an optional AI planning assistant.
+A local-first calendar with a required, tested AI planning assistant and Google Calendar connection before the workspace unlocks.
 
 ## Install and run
 
@@ -24,25 +24,48 @@ smart-calendar --port 4180
 smart-calendar --data-dir "D:\MyCalendarData"
 ~~~
 
-## AI assistant
+## First-run setup
 
-The calendar works without an AI provider. To use the AI assistant, open AI settings and enter an OpenAI-compatible HTTPS Base URL, model ID, and an API key from a provider you have access to. The key is encrypted locally with AES-256-GCM and is not returned to the browser. AI requests go from the local Node.js process to the provider configured by that user.
+The calendar remains locked until setup is completed in this order:
 
-This local package does not use a shared server API and does not give every user a shared quota. If you want users to rely on one API key owned and paid for by the project publisher, the architecture must instead include a centrally hosted backend, budgets, usage limits, and abuse prevention.
+1. Choose English or Persian.
+2. Connect Google Calendar and pass a real Calendar API access check.
+3. Configure one or more AI providers and pass the live response test.
+4. Complete the AI-led interview about goals, routines, constraints, and preferences.
+5. Review the categorized Markdown memory files and explicitly approve saving them.
+
+The assistant continues in the selected language. It can propose calendar changes and memory updates, but both require explicit user approval before they are applied.
+
+## AI providers, fallback, and proxy
+
+Add multiple OpenAI-compatible providers. Smart Calendar tests them in order and automatically tries the next enabled provider if a request fails, is rate-limited, or returns an invalid response. Each provider has its own Base URL, model ID, API key, and optional HTTP/HTTPS proxy URL.
+
+In the local package, AI keys are encrypted at rest with AES-256-GCM; they are not returned to the browser. Local proxy URLs are supported for local networking. The hosted API blocks private/loopback proxy targets to reduce server-side request risks.
+
+This local package does not use a shared server API and does not give every user a shared quota. If you want users to rely on one API key owned and paid for by the project publisher, that requires a centrally hosted backend with budgets, usage limits, and abuse prevention.
 
 ## Privacy and data
 
 - No account or external database is required for the local package.
 - Calendar events and AI settings stay in the local data folder.
+- Approved local Markdown files are stored under .smart-calendar/memory/.
 - The server binds to 127.0.0.1 and rejects cross-origin requests.
 - AI keys are encrypted on disk; keep the encryption.key file private.
+- Google access tokens are kept in session memory and are not written to disk.
+- Calendar changes and memory updates require explicit approval.
 - Messages are sent to the AI provider that the user configures.
 
 Back up the .smart-calendar folder to preserve events and settings. Losing encryption.key means a saved AI key cannot be decrypted.
 
 ## Google Calendar
 
-Google Calendar integration is optional and needs the publisher to configure a Google OAuth client ID, enable Google Calendar API, and authorize the local origin in Google Cloud. The calendar's local features work even without Google OAuth setup.
+Google Calendar connection is mandatory before the workspace unlocks. The publisher must create a valid Google OAuth Client ID, enable Google Calendar API, and authorize all app origins in Google Cloud:
+
+- http://127.0.0.1:4178
+- http://localhost:4178
+- https://abdiparsa1390-svg.github.io (for the GitHub Pages frontend)
+
+For GitHub Actions builds, add repository variable GOOGLE_CLIENT_ID under **Settings → Secrets and variables → Actions → Variables**. If it is missing or invalid, Google authorization will not work and setup must remain locked. Do not put the OAuth client secret in frontend variables; the browser OAuth client ID is a public identifier.
 
 ## For maintainers
 
