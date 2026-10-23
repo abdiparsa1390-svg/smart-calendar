@@ -10,6 +10,54 @@ const CONFIG_KEY = "smart-calendar-ai-config-v1";
 const EVENTS_KEY = "smart-calendar-events-v1";
 const COLORS = ["#6d72d9", "#24a79b", "#e39c4c", "#de718d", "#6298dd"];
 const blankConfig = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "" };
+const GOOGLE_CLIENT_ID_KEY = "smart-calendar-google-client-id-v1";
+const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
+function loadGoogleClientId() {
+  try { return localStorage.getItem(GOOGLE_CLIENT_ID_KEY) || ""; } catch { return ""; }
+}
+function googleEventToAppEvent(item) {
+  const start = item.start?.dateTime ? new Date(item.start.dateTime) : new Date((item.start?.date || dayKey(new Date())) + "T09:00:00");
+  const end = item.end?.dateTime ? new Date(item.end.dateTime) : new Date((item.end?.date || item.start?.date || dayKey(new Date())) + "T10:00:00");
+  return {
+    id: item.id,
+    googleId: item.id,
+    source: "google",
+    title: item.summary || "Untitled event",
+    start,
+    end,
+    color: COLORS[1],
+    place: item.description || item.location || "",
+    googleUrl: item.htmlLink || ""
+  };
+}
+function googlePayloadFromDraft(draft, start, end) {
+  return {
+    summary: draft.title.trim(),
+    description: draft.place || "",
+    start: { dateTime: start.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+    end: { dateTime: end.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+  };
+}
+function loadGoogleIdentityScript() {
+  if (window.google?.accounts?.oauth2) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let script = document.getElementById("google-identity-script");
+    if (script) {
+      script.addEventListener("load", resolve, { once: true });
+      script.addEventListener("error", () => reject(new Error("Could not load Google's authorization library. Check your internet connection.")), { once: true });
+      return;
+    }
+    script = document.createElement("script");
+    script.id = "google-identity-script";
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Could not load Google's authorization library. Check your internet connection."));
+    document.head.appendChild(script);
+  });
+}
 
 function loadConfig() {
   try {
@@ -80,6 +128,18 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(() => { try { return localStorage.getItem("smart-calendar-onboarding-done") !== "yes"; } catch { return true; } });
   const [onboardingStep, setOnboardingStep] = useState(0);
   const [showEventModal, setShowEventModal] = useState(false);
+  const [editingEventId, setEditingEventId] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState(loadGoogleClientId);
+  const [googleClientIdDraft, setGoogleClientIdDraft] = useState(loadGoogleClientId);
+  const [accessToken, setAccessToken] = useState("");
+  const [googleError, setGoogleError] = useState("");
+  const [googleSyncState, setGoogleSyncState] = useState("idle");
+  const googleTokenClientRef = useRef(null);
+  const syncRequestRef = useRef(0);
+  const pressTimerRef = useRef(null);
+  const longPressTriggeredRef = useRef(false);
   const [config, setConfig] = useState(loadConfig);
   const [showApiKey, setShowApiKey] = useState(false);
   const [testState, setTestState] = useState("idle");
@@ -93,7 +153,7 @@ export default function App() {
   const chatEndRef = useRef(null);
 
   useEffect(() => {
-    try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events)); } catch { /* Browser storage can be unavailable. */ }
+    try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events.filter(event => event.source !== "google"))); } catch { /* Browser storage can be unavailable. */ }
   }, [events]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, sending]);
   useEffect(() => {
@@ -121,6 +181,76 @@ export default function App() {
     });
   }, [currentDate, view]);
 
+  async function googleApiRequest(path, method = "GET", body = null, token = accessToken) {
+    const response = await fetch("https://www.googleapis.com/calendar/v3" + path, {
+      method,
+      headers: { Authorization: "Bearer " + token, ...(body ? { "Content-Type": "application/json" } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(data?.error?.message || ("Google Calendar request failed (" + response.status + ")."));
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  }
+
+  async function syncGoogleCalendar(token = accessToken, days = visibleDays) {
+    if (!token || !days?.length) return;
+    const requestId = ++syncRequestRef.current;
+    setGoogleSyncState("syncing");
+    try {
+      const from = new Date(days[0]);
+      from.setHours(0, 0, 0, 0);
+      const until = new Date(days[days.length - 1]);
+      until.setDate(until.getDate() + 1);
+      until.setHours(0, 0, 0, 0);
+      const query = new URLSearchParams({
+        timeMin: from.toISOString(),
+        timeMax: until.toISOString(),
+        singleEvents: "true",
+        orderBy: "startTime",
+        maxResults: "2500"
+      });
+      const data = await googleApiRequest("/calendars/primary/events?" + query.toString(), "GET", null, token);
+      if (requestId !== syncRequestRef.current) return;
+      const syncedEvents = (data.items || []).filter(item => item.status !== "cancelled").map(googleEventToAppEvent);
+      setEvents(previous => [...previous.filter(event => event.source !== "google"), ...syncedEvents]);
+      setGoogleSyncState("success");
+      setGoogleError("");
+    } catch (error) {
+      if (requestId !== syncRequestRef.current) return;
+      setGoogleSyncState("error");
+      setGoogleError(error.message || "Could not sync Google Calendar.");
+      if (error.status === 401) setAccessToken("");
+    }
+  }
+
+  useEffect(() => {
+    if (accessToken) syncGoogleCalendar(accessToken, visibleDays);
+  }, [accessToken, currentDate, view]);
+
+  useEffect(() => {
+    if (!showGoogleModal) return;
+    loadGoogleIdentityScript().catch(error => setGoogleError(error.message));
+  }, [showGoogleModal]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeOutside = event => {
+      if (event.target.closest?.(".event-context-menu") || event.target.closest?.("[data-calendar-event]")) return;
+      setContextMenu(null);
+    };
+    const closeOnEscape = event => { if (event.key === "Escape") setContextMenu(null); };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenu]);
+
   const rangeLabel = useMemo(() => {
     if (view === "day") return dateText(currentDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
     if (view === "month") return dateText(currentDate, { month: "long", year: "numeric" });
@@ -142,10 +272,135 @@ export default function App() {
     });
   }
   function openNewEvent(date = currentDate, hour = 9) {
+    setEditingEventId(null);
     setDraft({ title: "", date: dayKey(date), start: String(hour).padStart(2, "0") + ":00", end: String(Math.min(hour + 1, 23)).padStart(2, "0") + ":00", color: COLORS[0], place: "" });
     setShowEventModal(true);
   }
-  function saveEvent(e) {
+  function openEditEvent(event) {
+    if (event.source === "google" && !accessToken) {
+      setGoogleClientIdDraft(googleClientId);
+      setGoogleError("Reconnect Google Calendar to edit this synced event.");
+      setShowGoogleModal(true);
+      return;
+    }
+    setEditingEventId(event.id);
+    setDraft({
+      title: event.title,
+      date: dayKey(event.start),
+      start: String(event.start.getHours()).padStart(2, "0") + ":" + String(event.start.getMinutes()).padStart(2, "0"),
+      end: String(event.end.getHours()).padStart(2, "0") + ":" + String(event.end.getMinutes()).padStart(2, "0"),
+      color: event.color || COLORS[0],
+      place: event.place || ""
+    });
+    setShowEventModal(true);
+    setContextMenu(null);
+  }
+  function showEventContextMenu(event, x, y) {
+    const menuWidth = 205;
+    const menuHeight = event.source === "google" && event.googleUrl ? 150 : 116;
+    setContextMenu({
+      event,
+      x: Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8))
+    });
+  }
+  function clearPressTimer() {
+    if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
+    pressTimerRef.current = null;
+  }
+  function eventInteractionProps(event) {
+    return {
+      "data-calendar-event": "true",
+      onClick: click => {
+        click.stopPropagation();
+        if (longPressTriggeredRef.current) { longPressTriggeredRef.current = false; return; }
+        openEditEvent(event);
+      },
+      onContextMenu: click => {
+        click.preventDefault();
+        click.stopPropagation();
+        showEventContextMenu(event, click.clientX, click.clientY);
+      },
+      onPointerDown: pointer => {
+        if (pointer.pointerType !== "touch") return;
+        clearPressTimer();
+        const x = pointer.clientX;
+        const y = pointer.clientY;
+        longPressTriggeredRef.current = false;
+        pressTimerRef.current = setTimeout(() => {
+          longPressTriggeredRef.current = true;
+          showEventContextMenu(event, x, y);
+        }, 520);
+      },
+      onPointerUp: clearPressTimer,
+      onPointerCancel: clearPressTimer,
+      onPointerLeave: clearPressTimer
+    };
+  }
+  async function startGoogleConnect(e) {
+    e?.preventDefault();
+    const clientId = googleClientIdDraft.trim();
+    if (!clientId) { setGoogleError("Enter your Google OAuth Client ID first."); return; }
+    try {
+      localStorage.setItem(GOOGLE_CLIENT_ID_KEY, clientId);
+      setGoogleClientId(clientId);
+      await loadGoogleIdentityScript();
+      if (!window.google?.accounts?.oauth2) throw new Error("Google authorization did not load. Please try again.");
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: GOOGLE_SCOPE,
+        callback: response => {
+          if (response.error || !response.access_token) {
+            setGoogleError(response.error_description || response.error || "Google authorization was cancelled.");
+            setGoogleSyncState("error");
+            return;
+          }
+          setAccessToken(response.access_token);
+          setGoogleError("");
+          setGoogleSyncState("syncing");
+          setShowGoogleModal(false);
+          setToast("Google Calendar connected");
+        },
+        error_callback: response => setGoogleError(response?.message || "The Google sign-in popup could not open. Allow popups and try again.")
+      });
+      googleTokenClientRef.current = client;
+      client.requestAccessToken({ prompt: "consent" });
+    } catch (error) {
+      setGoogleError(error.message || "Could not start Google Calendar authorization.");
+    }
+  }
+  function disconnectGoogle() {
+    if (accessToken && window.google?.accounts?.oauth2) {
+      window.google.accounts.oauth2.revoke(accessToken, () => {});
+    }
+    setAccessToken("");
+    setEvents(previous => previous.filter(event => event.source !== "google"));
+    setGoogleSyncState("idle");
+    setGoogleError("");
+    setToast("Google Calendar disconnected");
+  }
+  async function deleteEvent(event) {
+    setContextMenu(null);
+    if (!window.confirm("Delete “" + event.title + "”?")) return;
+    try {
+      if (event.source === "google") {
+        if (!accessToken) {
+          setGoogleClientIdDraft(googleClientId);
+          setGoogleError("Reconnect Google Calendar to delete this event.");
+          setShowGoogleModal(true);
+          return;
+        }
+        await googleApiRequest("/calendars/primary/events/" + encodeURIComponent(event.googleId || event.id), "DELETE", null, accessToken);
+      }
+      setEvents(previous => previous.filter(item => item.id !== event.id));
+      setShowEventModal(false);
+      setToast(event.source === "google" ? "Event deleted from Google Calendar" : "Event deleted");
+    } catch (error) {
+      if (error.status === 401) { setAccessToken(""); setGoogleClientIdDraft(googleClientId); setShowGoogleModal(true); }
+      setToast(error.message || "Could not delete the event.");
+    }
+  }
+  async function saveEvent(e) {
     e.preventDefault();
     if (!draft.title.trim()) return;
     const parts = draft.date.split("-").map(Number);
@@ -154,11 +409,47 @@ export default function App() {
     const start = new Date(parts[0], parts[1] - 1, parts[2], s[0], s[1]);
     const end = new Date(parts[0], parts[1] - 1, parts[2], t[0], t[1]);
     if (end <= start) { setToast("End time must be after start time."); return; }
-    setEvents(prev => [...prev, { ...draft, id: crypto.randomUUID(), title: draft.title.trim(), start, end }]);
-    setCurrentDate(start);
-    setView("week");
-    setShowEventModal(false);
-    setToast("Event added to your calendar");
+    const existing = events.find(event => event.id === editingEventId);
+    try {
+      if (existing?.source === "google") {
+        if (!accessToken) {
+          setGoogleClientIdDraft(googleClientId);
+          setGoogleError("Reconnect Google Calendar to save changes to this event.");
+          setShowGoogleModal(true);
+          return;
+        }
+        const updated = await googleApiRequest(
+          "/calendars/primary/events/" + encodeURIComponent(existing.googleId || existing.id),
+          "PATCH",
+          googlePayloadFromDraft(draft, start, end),
+          accessToken
+        );
+        setEvents(previous => previous.map(event => event.id === existing.id ? googleEventToAppEvent(updated) : event));
+        setToast("Google Calendar event updated");
+      } else if (!existing && accessToken) {
+        const created = await googleApiRequest(
+          "/calendars/primary/events",
+          "POST",
+          googlePayloadFromDraft(draft, start, end),
+          accessToken
+        );
+        setEvents(previous => [...previous, googleEventToAppEvent(created)]);
+        setToast("Event added to Google Calendar");
+      } else if (existing) {
+        setEvents(previous => previous.map(event => event.id === existing.id ? { ...event, ...draft, title: draft.title.trim(), start, end } : event));
+        setToast("Event updated");
+      } else {
+        setEvents(previous => [...previous, { ...draft, id: crypto.randomUUID(), source: "local", title: draft.title.trim(), start, end }]);
+        setToast("Event added to your calendar");
+      }
+      setCurrentDate(start);
+      setView("week");
+      setShowEventModal(false);
+      setEditingEventId(null);
+    } catch (error) {
+      if (error.status === 401) { setAccessToken(""); setGoogleClientIdDraft(googleClientId); setShowGoogleModal(true); }
+      setToast(error.message || "Could not save the event.");
+    }
   }
   function saveConfig(e) {
     e.preventDefault();
