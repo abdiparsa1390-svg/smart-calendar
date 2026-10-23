@@ -396,11 +396,11 @@ app.post("/api/auth/logout", requireAuth, async (req, res, next) => {
 app.get("/api/events", requireAuth, async (req, res, next) => {
   try {
     const result = await pool.query(
-      "SELECT id, title, start_at, end_at, color, place FROM user_events WHERE user_id = $1 ORDER BY start_at ASC",
+      "SELECT id, title, start_at, end_at, color, place, location, all_day, reminder_minutes, recurrence FROM user_events WHERE user_id = $1 ORDER BY start_at ASC",
       [req.user.id]
     );
     return res.json({ events: result.rows.map(row => ({
-      id: row.id, title: row.title, start: row.start_at, end: row.end_at, color: row.color, place: row.place, source: "local"
+      id: row.id, title: row.title, start: row.start_at, end: row.end_at, color: row.color, place: row.place, location: row.location, allDay: row.all_day, reminderMinutes: row.reminder_minutes, recurrence: row.recurrence, source: "local"
     })) });
   } catch (error) { next(error); }
 });
@@ -419,7 +419,11 @@ app.put("/api/events", requireAuth, async (req, res, next) => {
     normalised.push({
       id: String(event.id), title, start, end,
       color: /^#[0-9a-f]{6}$/i.test(String(event.color || "")) ? String(event.color) : "#6d72d9",
-      place: String(event.place || "").slice(0, 2000)
+      place: String(event.place || "").slice(0, 2000),
+      location: String(event.location || "").slice(0, 1000),
+      allDay: Boolean(event.allDay),
+      reminderMinutes: event.reminderMinutes == null || event.reminderMinutes === "" ? null : Math.max(0, Math.min(40320, Number(event.reminderMinutes) || 0)),
+      recurrence: ["none","daily","weekly","monthly"].includes(String(event.recurrence || "none")) ? String(event.recurrence || "none") : "none"
     });
   }
   const client = await pool.connect();
@@ -428,8 +432,8 @@ app.put("/api/events", requireAuth, async (req, res, next) => {
     await client.query("DELETE FROM user_events WHERE user_id = $1", [req.user.id]);
     for (const event of normalised) {
       await client.query(
-        "INSERT INTO user_events (id, user_id, title, start_at, end_at, color, place) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        [event.id, req.user.id, event.title, event.start, event.end, event.color, event.place]
+        "INSERT INTO user_events (id, user_id, title, start_at, end_at, color, place, location, all_day, reminder_minutes, recurrence) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        [event.id, req.user.id, event.title, event.start, event.end, event.color, event.place, event.location, event.allDay, event.reminderMinutes, event.recurrence]
       );
     }
     await client.query("COMMIT");
