@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import "./enhancements.css";
 import {
   ArrowRight, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight,
   CircleHelp, Clock3, Eye, EyeOff, ListTodo, MessageSquare, MoreHorizontal,
