@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./enhancements.css";
+import AuthGate from "./AuthGate.jsx";
+import { API_AVAILABLE, apiFetch } from "./api.js";
 import {
   ArrowRight, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight,
   CircleHelp, Clock3, Eye, EyeOff, ListTodo, MessageSquare, MoreHorizontal,
@@ -7,7 +9,6 @@ import {
 } from "lucide-react";
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 7);
-const CONFIG_KEY = "smart-calendar-ai-config-v1";
 const EVENTS_KEY = "smart-calendar-events-v1";
 const COLORS = ["#6d72d9", "#24a79b", "#e39c4c", "#de718d", "#6298dd"];
 const blankConfig = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "" };
@@ -57,12 +58,7 @@ function loadGoogleIdentityScript() {
 }
 
 function loadConfig() {
-  try {
-    const saved = localStorage.getItem(CONFIG_KEY);
-    return saved ? { ...blankConfig, ...JSON.parse(saved) } : blankConfig;
-  } catch {
-    return blankConfig;
-  }
+  return blankConfig;
 }
 function dayKey(date) {
   return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
@@ -118,6 +114,12 @@ function IconButton({ title, onClick, children }) {
 }
 
 export default function App() {
+  const [authStatus, setAuthStatus] = useState("checking");
+  const [user, setUser] = useState(null);
+  const [authNotice, setAuthNotice] = useState("");
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
+  const eventsHydratedForUserRef = useRef(null);
+  const skipEventPersistRef = useRef(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState("week");
   const [events, setEvents] = useState(loadEvents);
@@ -149,8 +151,89 @@ export default function App() {
   const chatEndRef = useRef(null);
 
   useEffect(() => {
+    if (user) return;
     try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events.filter(event => event.source !== "google"))); } catch { /* Browser storage can be unavailable. */ }
-  }, [events]);
+  }, [events, user]);
+
+  useEffect(() => {
+    if (!user || eventsHydratedForUserRef.current !== user.id) return undefined;
+    if (skipEventPersistRef.current) {
+      skipEventPersistRef.current = false;
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      const localEvents = events.filter(event => event.source !== "google").map(event => ({
+        id: event.id,
+        title: event.title,
+        start: event.start.toISOString(),
+        end: event.end.toISOString(),
+        color: event.color || COLORS[0],
+        place: event.place || ""
+      }));
+      apiFetch("/api/events", { method: "PUT", body: JSON.stringify({ events: localEvents }) })
+        .catch(error => setToast("Could not save your calendar: " + error.message));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [events, user]);
+  async function establishSession(account) {
+    const [eventData, settingsData] = await Promise.all([
+      apiFetch("/api/events"),
+      apiFetch("/api/ai/settings")
+    ]);
+    const accountEvents = (eventData.events || []).map(event => ({
+      ...event,
+      start: new Date(event.start),
+      end: new Date(event.end),
+      source: "local"
+    }));
+    skipEventPersistRef.current = true;
+    eventsHydratedForUserRef.current = account.id;
+    setEvents(accountEvents);
+    setConfig({ baseUrl: settingsData.baseUrl || blankConfig.baseUrl, apiKey: "", model: settingsData.model || "" });
+    setApiKeyConfigured(Boolean(settingsData.apiKeyConfigured));
+    setUser(account);
+    setAuthNotice("");
+    setAuthStatus("authenticated");
+  }
+
+  useEffect(() => {
+    let active = true;
+    async function boot() {
+      if (!API_AVAILABLE) {
+        setAuthStatus("backend-missing");
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      const verificationToken = params.get("verify");
+      if (verificationToken) {
+        try {
+          const result = await apiFetch("/api/auth/verify-email", {
+            method: "POST",
+            body: JSON.stringify({ token: verificationToken })
+          });
+          if (active) setAuthNotice(result.message || "Email verified. You can now sign in.");
+        } catch (error) {
+          if (active) setAuthNotice(error.message || "This verification link is invalid or expired.");
+        } finally {
+          params.delete("verify");
+          const query = params.toString();
+          window.history.replaceState({}, "", window.location.pathname + (query ? "?" + query : "") + window.location.hash);
+        }
+      }
+      try {
+        const result = await apiFetch("/api/auth/me");
+        if (!active) return;
+        await establishSession(result.user);
+      } catch (error) {
+        if (!active) return;
+        setAuthStatus(error.status === 401 ? "guest" : "backend-error");
+        if (error.status !== 401) setAuthNotice(error.message || "The account server is not responding.");
+      }
+    }
+    boot();
+    return () => { active = false; };
+  }, []);
+
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, sending]);
   useEffect(() => {
     if (!toast) return undefined;
@@ -259,7 +342,7 @@ export default function App() {
     return dateText(first, { month: "short", day: "numeric" }) + " – " + dateText(last, { month: "short", day: "numeric", year: "numeric" });
   }, [currentDate, view, visibleDays]);
 
-  const isConfigured = Boolean(config.baseUrl.trim() && config.apiKey.trim() && config.model.trim());
+  const isConfigured = Boolean(config.baseUrl.trim() && (config.apiKey.trim() || apiKeyConfigured) && config.model.trim());
 
   function navigate(direction) {
     setCurrentDate(prev => {
@@ -463,42 +546,56 @@ export default function App() {
       setToast(error.message || "Could not save the event.");
     }
   }
-  function saveConfig(e) {
+  async function saveConfig(e) {
     e.preventDefault();
     try {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
-      setTestMessage("Settings saved in this browser.");
+      const result = await apiFetch("/api/ai/settings", {
+        method: "PUT",
+        body: JSON.stringify(config)
+      });
+      setConfig(previous => ({ ...previous, apiKey: "", baseUrl: result.baseUrl || previous.baseUrl, model: result.model || previous.model }));
+      setApiKeyConfigured(Boolean(result.apiKeyConfigured));
+      setTestMessage("AI settings saved to your account.");
       setTestState("success");
       setShowSettings(false);
-      setToast("AI settings saved");
-    } catch {
+      setToast("AI settings saved to your account");
+    } catch (error) {
       setTestState("error");
-      setTestMessage("Could not save settings in this browser.");
+      setTestMessage(error.message || "Could not save your AI settings.");
     }
   }
   async function testConnection(e) {
     e.preventDefault();
     setTestState("testing");
     setTestMessage("");
-    if (!config.baseUrl.trim() || !config.apiKey.trim() || !config.model.trim()) {
+    if (!config.baseUrl.trim() || !config.model.trim() || (!config.apiKey.trim() && !apiKeyConfigured)) {
       setTestState("error");
       setTestMessage("Enter the Base URL, API key, and model first.");
       return;
     }
     try {
-      const response = await fetch(endpointFor(config.baseUrl), {
+      const result = await apiFetch("/api/ai/test", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + config.apiKey.trim() },
-        body: JSON.stringify({ model: config.model.trim(), messages: [{ role: "user", content: "Reply with only: Connected" }], max_tokens: 12 })
+        body: JSON.stringify(config)
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error?.message || data?.message || "Request failed with status " + response.status);
       setTestState("success");
-      setTestMessage("Connection successful. Your model replied to the test request.");
+      setTestMessage(result.message || "Connection successful. Your model replied to the test request.");
     } catch (error) {
       setTestState("error");
-      setTestMessage(error.message || "Could not connect. Check the URL, model, key, and provider CORS settings.");
+      setTestMessage(error.message || "Could not connect. Check the URL, model, and API key.");
     }
+  }
+  async function handleSignOut() {
+    try { await apiFetch("/api/auth/logout", { method: "POST" }); } catch { /* Clear local account state even if the server session expired. */ }
+    eventsHydratedForUserRef.current = null;
+    skipEventPersistRef.current = true;
+    setUser(null);
+    setAuthStatus("guest");
+    setEvents([]);
+    setConfig(blankConfig);
+    setApiKeyConfigured(false);
+    setMessages([{ id: "welcome", role: "assistant", content: "Hey! I’m your calendar sidekick. ☀️\n\nConnect your AI model in settings when you're ready." }]);
+    setToast("");
   }
   async function sendMessage(e) {
     e?.preventDefault();
@@ -516,21 +613,16 @@ export default function App() {
     setChatInput("");
     setSending(true);
     try {
-      const response = await fetch(endpointFor(config.baseUrl), {
+      const data = await apiFetch("/api/ai/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + config.apiKey.trim() },
         body: JSON.stringify({
-          model: config.model.trim(),
           messages: [
             { role: "system", content: "You are the friendly AI assistant in Smart Calendar. For now, discuss scheduling and planning in chat, but you do not have calendar-editing tools. Never claim to have changed calendar events." },
             ...history.filter(m => m.role === "user" || m.role === "assistant").map(m => ({ role: m.role, content: m.content }))
-          ],
-          temperature: 0.7
+          ]
         })
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error?.message || data?.message || "Request failed with status " + response.status);
-      const answer = data?.choices?.[0]?.message?.content;
+      const answer = data?.content;
       if (!answer) throw new Error("The API response did not include an assistant message.");
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", content: typeof answer === "string" ? answer : JSON.stringify(answer) }]);
     } catch (error) {
@@ -538,11 +630,15 @@ export default function App() {
     } finally { setSending(false); }
   }
 
+  if (authStatus !== "authenticated" || !user) {
+    return <AuthGate status={authStatus} message={authNotice} onMessage={setAuthNotice} onAuthenticated={establishSession} />;
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><CalendarDays size={21} /></div><span>smart<span className="brand-light">calendar</span></span><span className="beta-tag">BETA</span></div>
-        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><IconButton title="Setup guide" onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton><div className="avatar">SC</div></div>
+        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><span className="account-email" title={user.email}>{user.email}</span><IconButton title="Setup guide" onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton><button type="button" className="account-signout" onClick={handleSignOut}>Sign out</button><div className="avatar">{user.email.slice(0, 1).toUpperCase()}</div></div>
       </header>
 
       <div className="mobile-switch">
@@ -629,7 +725,7 @@ export default function App() {
             <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Ask anything about your schedule…" rows={2} aria-label="Message the AI assistant" />
             <div className="composer-bottom"><span><ShieldCheck size={13} /> Your model, your choice</span><button className="send-button" type="submit" disabled={!chatInput.trim() || sending} aria-label="Send message">{sending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}</button></div>
           </form>
-          <p className="assistant-footnote">AI can make mistakes. Review important plans.</p>
+          <p className="assistant-footnote">Signed in as {user.email}. AI can make mistakes; review important plans.</p>
         </aside>
       </section>
 
@@ -647,10 +743,10 @@ export default function App() {
           <div className="modal-header"><div className="modal-heading-icon"><Bot size={20} /></div><div><h2 id="settings-title">Connect your AI model</h2><p>Use any provider with an OpenAI-compatible chat completions API.</p></div><IconButton title="Close settings" onClick={() => setShowSettings(false)}><X size={19} /></IconButton></div>
           <form onSubmit={saveConfig} className="settings-form">
             <label>Base URL <span>Required</span><input value={config.baseUrl} onChange={e => setConfig(p => ({ ...p, baseUrl: e.target.value }))} placeholder="https://api.openai.com/v1" autoComplete="url" required /><small>Enter the provider base URL; /chat/completions is added automatically.</small></label>
-            <label>API key <span>Secret</span><div className="secret-input"><input type={showApiKey ? "text" : "password"} value={config.apiKey} onChange={e => setConfig(p => ({ ...p, apiKey: e.target.value }))} placeholder="sk-..." autoComplete="off" required /><IconButton title={showApiKey ? "Hide API key" : "Show API key"} onClick={() => setShowApiKey(v => !v)}>{showApiKey ? <EyeOff size={17} /> : <Eye size={17} />}</IconButton></div><small>Stored in this browser for this prototype only.</small></label>
+            <label>API key <span>{apiKeyConfigured ? "Saved securely" : "Required"}</span><div className="secret-input"><input type={showApiKey ? "text" : "password"} value={config.apiKey} onChange={e => setConfig(p => ({ ...p, apiKey: e.target.value }))} placeholder={apiKeyConfigured ? "Leave blank to keep the saved key" : "Enter your provider API key"} autoComplete="off" required={!apiKeyConfigured} /><IconButton title={showApiKey ? "Hide API key" : "Show API key"} onClick={() => setShowApiKey(v => !v)}>{showApiKey ? <EyeOff size={17} /> : <Eye size={17} />}</IconButton></div><small>{apiKeyConfigured ? "Your key is encrypted on the server. Leave blank to keep it, or enter a new key to replace it." : "Your key is sent over HTTPS and encrypted by the account server before storage."}</small></label>
             <label>Model name <span>Required</span><input value={config.model} onChange={e => setConfig(p => ({ ...p, model: e.target.value }))} placeholder="e.g. gpt-4o-mini" autoComplete="off" required /><small>Use the exact model ID supported by your provider.</small></label>
             {testMessage && <div className={"test-message " + (testState === "error" ? "test-error" : testState === "success" ? "test-success" : "")}>{testState === "success" ? <Check size={16} /> : testState === "error" ? <CircleHelp size={16} /> : <MessageSquare size={16} />}<span>{testMessage}</span></div>}
-            <div className="security-note"><ShieldCheck size={17} /><span><strong>Local prototype</strong> — settings stay in this browser. For a public production site, move API calls to a server so keys aren't exposed in browser code.</span></div>
+            <div className="security-note"><ShieldCheck size={17} /><span><strong>Private to your account</strong> — your key is stored encrypted on the server and only used by your own AI requests. It is never sent back to the browser after saving.</span></div>
             <div className="modal-actions"><button type="button" className="secondary-button" onClick={testConnection} disabled={testState === "testing"}>{testState === "testing" ? <RefreshCw size={16} className="spin" /> : <Zap size={16} />} Test connection</button><button type="submit" className="primary-button"><Check size={16} /> Save settings</button></div>
           </form>
         </section>
