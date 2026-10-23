@@ -22,7 +22,13 @@ For a production deployment, hosting the frontend and API on the same site/domai
 
 You need Node.js 20+, PostgreSQL, and a newly generated Gmail App Password (or preferably a configured Gmail OAuth 2.0 SMTP transport for a production service).
 
-1. Create a PostgreSQL database named `smart_calendar`, or update the database URL to your existing database.
+1. Start a local PostgreSQL database (Docker required for this command):
+
+   ```cmd
+   docker compose up -d postgres
+   ```
+
+   Or create a PostgreSQL database named `smart_calendar` yourself, then update the database URL if needed.
 2. Copy `server/.env.example` to `server/.env`:
 
    ```cmd
