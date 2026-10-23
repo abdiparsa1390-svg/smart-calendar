@@ -224,7 +224,9 @@ async function resolveAIConfig(userId, overrides = {}, allowUnsavedKey = false) 
     else if(old?.api_key_ciphertext)apiKey=decryptSecret(old);
     else if(p.api_key_ciphertext)apiKey=decryptSecret(p);
     else if(i===0&&saved?.api_key_ciphertext)apiKey=decryptSecret(saved);
-    if(!model||model.length>200||!apiKey)throw Object.assign(new Error("Every enabled AI provider needs a Base URL, model, and API key."),{status:400});
+    if(!model)throw Object.assign(new Error(`${String(p.name||`Provider ${i+1}`)}: Model ID is missing. Enter the exact model slug shown by your provider.`),{status:400});
+    if(model.length>200)throw Object.assign(new Error(`${String(p.name||`Provider ${i+1}`)}: Model ID is too long. Check the model slug.`),{status:400});
+    if(!apiKey)throw Object.assign(new Error(`${String(p.name||`Provider ${i+1}`)}: API key is missing. Paste the key for this provider.`),{status:400});
     const proxyUrl=await validateAIProxyUrl(p.proxyUrl||p.proxy_url||old?.proxy_url||"");
     providers.push({id:String(p.id||"provider-"+i),name:String(p.name||`Provider ${i+1}`).slice(0,100),baseUrl,model,apiKey,proxyUrl});
   }
@@ -241,7 +243,7 @@ async function askOneAI(config, messages) {
       signal: AbortSignal.timeout(35_000), ...(dispatcher ? { dispatcher } : {})
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(String(data?.error?.message || data?.message || `AI provider returned HTTP ${response.status}`).slice(0, 500));
+    if (!response.ok) { const detail=String(data?.error?.message || data?.message || "").trim(); const status=response.status; const hints={400:"Check the model ID and request format.",401:"The API key was rejected. Check or recreate the key.",402:"The account may need credits or a payment method.",403:"Access denied. Check model permissions and account limits.",404:"Endpoint or model not found. Check Base URL and exact model slug.",408:"Request timed out. Try again.",429:"Rate limit reached. Wait, check quota, or use a backup provider.",500:"Provider server error; try again later.",502:"Provider gateway error; try again later.",503:"Provider temporarily unavailable; check its status page."}; throw new Error(`${config.name}: HTTP ${status}${detail ? " — "+detail : ""}.${hints[status] ? " "+hints[status] : ""}`.slice(0,700)); }
     if(!data?.choices?.[0]?.message?.content)throw new Error("The provider returned no assistant message.");
     return data;
   } finally { if(dispatcher)await dispatcher.close().catch(()=>{}); }
@@ -250,7 +252,7 @@ async function askAIWithFallback(configs, messages) {
   const failures=[];
   for(const config of configs){
     try{return {data:await askOneAI(config,messages),providerId:config.id,providerName:config.name};}
-    catch(error){failures.push(config.name+": "+String(error.message||"connection failed").slice(0,300));}
+    catch(error){let detail=String(error.message||"connection failed");if(error?.name==="TimeoutError"||error?.name==="AbortError")detail="Request timed out after 35 seconds. Check connection or try another model.";else if(error instanceof TypeError)detail="Could not connect to API. Check internet, Base URL, DNS, and proxy settings. "+detail;failures.push(config.name+": "+detail.slice(0,500));}
   }
   throw Object.assign(new Error("All AI providers failed. "+failures.join(" | ")),{status:502});
 }
