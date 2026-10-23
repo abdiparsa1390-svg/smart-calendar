@@ -151,6 +151,10 @@ export default function App() {
   const chatEndRef = useRef(null);
 
   useEffect(() => {
+    try { localStorage.removeItem("smart-calendar-ai-config-v1"); } catch { /* Ignore unavailable browser storage. */ }
+  }, []);
+
+  useEffect(() => {
     if (user) return;
     try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events.filter(event => event.source !== "google"))); } catch { /* Browser storage can be unavailable. */ }
   }, [events, user]);
