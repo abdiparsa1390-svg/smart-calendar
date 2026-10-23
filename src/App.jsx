@@ -680,6 +680,71 @@ export default function App() {
     } finally { setSending(false); }
   }
 
+  async function approveMemoryProposal(shouldSave) {
+    const proposal = pendingMemoryProposal;
+    setPendingMemoryProposal(null);
+    if (!shouldSave || !proposal) {
+      setToast(language === "fa" ? "پیشنهاد حافظه رد شد." : "Memory suggestion dismissed.");
+      return;
+    }
+    try {
+      const current = await apiFetch("/api/memory").catch(() => ({ files: {} }));
+      await apiFetch("/api/memory", { method: "PUT", body: JSON.stringify({ files: { ...(current.files || {}), [proposal.file]: proposal.content } }) });
+      setToast(language === "fa" ? "حافظهٔ شخصی به‌روزرسانی شد." : "Personal memory updated.");
+    } catch (error) {
+      setToast((language === "fa" ? "ذخیرهٔ حافظه ناموفق بود: " : "Could not save memory: ") + error.message);
+    }
+  }
+
+  async function applyCalendarProposal() {
+    if (!pendingCalendarProposal?.length || !accessToken) {
+      setToast(language === "fa" ? "ابتدا تقویم گوگل را متصل کن." : "Reconnect Google Calendar before applying changes.");
+      return;
+    }
+    setSending(true);
+    try {
+      const nextEvents = [...events];
+      for (const proposal of pendingCalendarProposal) {
+        const action = String(proposal.action || "create").toLowerCase();
+        const title = String(proposal.title || "").trim();
+        const start = new Date(proposal.start);
+        const end = new Date(proposal.end);
+        if (action !== "delete" && (!title || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start)) {
+          throw new Error("The proposed event has invalid dates or a missing title. Ask the assistant to revise it.");
+        }
+        const existing = proposal.id ? nextEvents.find(event => event.id === proposal.id || event.googleId === proposal.id) : null;
+        if (action === "delete") {
+          if (!existing) throw new Error("An event to delete could not be found. Ask the assistant to refresh the proposal.");
+          if (existing.source === "google") await googleApiRequest("/calendars/primary/events/" + encodeURIComponent(existing.googleId || existing.id), "DELETE", null, accessToken);
+          nextEvents.splice(nextEvents.indexOf(existing), 1);
+          continue;
+        }
+        const draftEvent = { title, place: String(proposal.place || ""), color: /^#[0-9a-f]{6}$/i.test(String(proposal.color || "")) ? proposal.color : COLORS[0] };
+        const payload = googlePayloadFromDraft(draftEvent, start, end);
+        if (action === "update" && existing?.source === "google") {
+          const result = await googleApiRequest("/calendars/primary/events/" + encodeURIComponent(existing.googleId || existing.id), "PATCH", payload, accessToken);
+          const normalized = { ...googleEventToAppEvent(result), color: draftEvent.color };
+          const index = nextEvents.findIndex(event => event.id === existing.id);
+          if (index >= 0) nextEvents[index] = normalized;
+        } else {
+          const result = await googleApiRequest("/calendars/primary/events", "POST", payload, accessToken);
+          const normalized = { ...googleEventToAppEvent(result), color: draftEvent.color };
+          if (existing) {
+            const index = nextEvents.findIndex(event => event.id === existing.id);
+            if (index >= 0) nextEvents.splice(index, 1);
+          }
+          nextEvents.push(normalized);
+        }
+      }
+      setEvents(nextEvents);
+      setPendingCalendarProposal(null);
+      syncGoogleCalendar(accessToken);
+      setToast(language === "fa" ? "تغییرات تأییدشده در تقویم گوگل اعمال شد." : "Approved changes were applied to Google Calendar.");
+    } catch (error) {
+      setToast((language === "fa" ? "اعمال تغییرات ناموفق بود: " : "Could not apply calendar changes: ") + error.message);
+    } finally { setSending(false); }
+  }
+
   function handleSetupComplete(result) {
     if (result?.action === "ai-saved") {
       const settings = result.settings || {};
@@ -795,6 +860,18 @@ export default function App() {
             {sending && <div className="message-row"><div className="message-avatar"><Sparkles size={14} /></div><div className="message-bubble assistant-bubble typing"><span /><span /><span /></div></div>}
             <div ref={chatEndRef} />
           </div>
+          {pendingCalendarProposal && <section className="approval-card calendar-approval">
+            <div className="approval-card-heading"><CalendarDays size={17}/><div><strong>{language === "fa" ? "پیشنهاد تغییر تقویم" : "Calendar change proposal"}</strong><span>{language === "fa" ? "هیچ چیز هنوز تغییر نکرده است." : "Nothing has changed yet."}</span></div></div>
+            <div className="approval-proposal-list">{pendingCalendarProposal.map((item,i)=><div className="approval-proposal" key={item.id || i}><span className="approval-action">{String(item.action||"create").toUpperCase()}</span><strong>{item.title || (language === "fa" ? "رویداد بدون عنوان" : "Untitled event")}</strong>{item.action !== "delete" && <small>{item.start ? new Date(item.start).toLocaleString(activeLocale(),{dateStyle:"medium",timeStyle:"short"}) : "?"} – {item.end ? new Date(item.end).toLocaleTimeString(activeLocale(),{hour:"numeric",minute:"2-digit"}) : "?"}</small>}{item.place && <p>{item.place}</p>}</div>)}</div>
+            <p className="approval-note"><LockKeyhole size={13}/>{language === "fa" ? "فقط با تأیید تو تغییرات به تقویم اصلی گوگل اعمال می‌شود." : "Changes reach your primary Google Calendar only after you approve."}</p>
+            <div className="approval-buttons"><button type="button" className="secondary-button" onClick={() => setPendingCalendarProposal(null)}>{language === "fa" ? "رد پیشنهاد" : "Reject"}</button><button type="button" className="primary-button" onClick={applyCalendarProposal} disabled={sending}><Check size={15}/>{language === "fa" ? "تأیید و اعمال" : "Approve & apply"}</button></div>
+          </section>}
+          {pendingMemoryProposal && <section className="approval-card memory-approval">
+            <div className="approval-card-heading"><FileText size={17}/><div><strong>{language === "fa" ? "پیشنهاد به‌روزرسانی حافظه" : "Memory update suggestion"}</strong><span>{pendingMemoryProposal.file} · {pendingMemoryProposal.reason || (language === "fa" ? "اطلاعات جدید دربارهٔ ترجیحات تو" : "A potentially useful planning detail")}</span></div></div>
+            <pre>{pendingMemoryProposal.content}</pre>
+            <p className="approval-note"><LockKeyhole size={13}/>{language === "fa" ? "تا وقتی تأیید نکنی فایل حافظه تغییر نمی‌کند." : "The memory file stays unchanged until you approve."}</p>
+            <div className="approval-buttons"><button type="button" className="secondary-button" onClick={() => approveMemoryProposal(false)}>{language === "fa" ? "نه، ممنون" : "Dismiss"}</button><button type="button" className="primary-button" onClick={() => approveMemoryProposal(true)}><Check size={15}/>{language === "fa" ? "ذخیره در حافظه" : "Approve & save"}</button></div>
+          </section>}
           <div className="suggestion-list"><button onClick={() => setChatInput("Help me plan a focused, balanced day.")}><Sparkles size={14} /> Plan my day</button><button onClick={() => setChatInput("How can I make time for deep work?")}><Clock3 size={14} /> Find focus time</button></div>
           <form className="chat-composer" onSubmit={sendMessage}>
             <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Ask anything about your schedule…" rows={2} aria-label="Message the AI assistant" />
