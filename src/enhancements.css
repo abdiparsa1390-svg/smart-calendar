@@ -42,3 +42,9 @@
 .google-not-ready p,.google-ready-copy p{margin:0}
 .google-modal .settings-form{padding-top:20px}
 .google-modal .modal-actions{margin-top:4px}
+
+.account-email{display:inline-block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#85869a;font-size:10px;font-weight:600}
+.account-signout{border:1px solid #e7e7f1;border-radius:8px;background:#fff;padding:7px 9px;color:#76788d;font-size:10px;font-weight:700;white-space:nowrap}
+.account-signout:hover{border-color:#c8c9ef;background:#f8f8ff;color:#6264c2}
+@media(max-width:900px){.account-email{max-width:115px}.account-signout{padding:6px 8px}}
+@media(max-width:580px){.account-email{display:none}.account-signout{font-size:9px;padding:6px}}
