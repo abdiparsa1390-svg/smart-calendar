@@ -160,11 +160,15 @@ function validateAIBaseUrl(value) {
     throw new Error("Use an HTTPS Base URL for AI providers (HTTP is allowed only for localhost during development).");
   }
   const host = url.hostname.toLowerCase();
-  if (host.endsWith(".local") || host.endsWith(".localhost") || host === "metadata.google.internal" ||
-      /^10\./.test(host) || /^192\.168\./.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === "169.254.169.254" ||
-      host === "0.0.0.0") {
-    throw new Error("Private network addresses are not allowed as AI provider URLs.");
+  const allowedDevLoopback = !isProduction && url.protocol === "http:" && isLocal;
+  const privateAddress =
+    /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host) ||
+    /^0\./.test(host) || host === "0.0.0.0" ||
+    host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80") ||
+    host === "metadata.google.internal" || host.endsWith(".local") || host.endsWith(".localhost");
+  if ((isLocal && !allowedDevLoopback) || (privateAddress && !allowedDevLoopback)) {
+    throw new Error("Private or loopback network addresses are not allowed as AI provider URLs.");
   }
   return url.toString().replace(/\/$/, "");
 }
