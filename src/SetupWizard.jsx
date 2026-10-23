@@ -119,11 +119,25 @@ export default function SetupWizard({
       const test = await apiFetch("/api/ai/test", { method: "POST", body: JSON.stringify({ providers: list, fallbackEnabled: true }) });
       if (!test.ok) throw new Error(test.message || "The connection test failed.");
       const saved = await apiFetch("/api/ai/settings", { method: "PUT", body: JSON.stringify({ providers: list, fallbackEnabled: true }) });
+
+      // Verify the encrypted settings can be read back and used after saving.
+      // The initial test uses unsaved input; onboarding must only proceed if
+      // the server can also authenticate using the persisted configuration.
+      const savedTest = await apiFetch("/api/ai/test", {
+        method: "POST",
+        body: JSON.stringify({ fallbackEnabled: true })
+      });
+      if (!savedTest.ok) throw new Error(savedTest.message || "The saved AI configuration could not be verified.");
+
       setAiTested(true);
-      setNotice((language === "fa" ? "اتصال موفق بود. ارائه‌دهندهٔ فعال: " : "Connection successful. Active provider: ") + (test.providerName || list[0].name));
+      setNotice((language === "fa" ? "تنظیمات ذخیره و دوباره آزمایش شدند. ارائه‌دهندهٔ فعال: " : "Settings saved and re-tested successfully. Active provider: ") + (savedTest.providerName || test.providerName || list[0].name));
       onComplete?.({ action: "ai-saved", language, settings: saved });
       setStage(3);
-      await beginInterview();
+      const interviewStarted = await beginInterview();
+      if (!interviewStarted) {
+        setStage(2);
+        setAiTested(false);
+      }
     } catch (e) {
       setError(e.message || (language === "fa" ? "اتصال هوش مصنوعی ناموفق بود." : "The AI connection test failed."));
     } finally { setSavingAI(false); }
@@ -149,9 +163,13 @@ export default function SetupWizard({
     try {
       const answer = await callInterview([], kickoff);
       setMessages([{ id: crypto.randomUUID(), role: "assistant", content: answer }]);
+      return true;
     } catch (e) {
+      // Do not let the user continue into memory creation with a fallback
+      // prompt when the real AI request failed.
       setError(e.message || "Could not start the interview.");
-      setMessages([{ id: crypto.randomUUID(), role: "assistant", content: language === "fa" ? "سلام! برای شروع، مهم‌ترین هدفی که دوست داری در چند ماه آینده به آن برسی چیست؟" : "Hi! To start, what is the most important goal you'd like to reach in the next few months?" }]);
+      setMessages([]);
+      return false;
     } finally { setChatBusy(false); }
   }
   async function sendInterviewMessage(e) {
@@ -183,7 +201,10 @@ export default function SetupWizard({
       const result = Object.fromEntries(memoryFiles.map(name => [name, String(parsed[name] || (language === "fa" ? "# هنوز مشخص نشده" : "# Not provided yet"))]));
       setMemoryPreview(result);
     } catch (e) {
-      setError((e.message || t.memoryError) + " — " + t.memoryError);
+      const reason = e.message || t.memoryError;
+      setError(language === "fa"
+        ? `ساخت خلاصهٔ حافظه ناموفق بود: ${reason} اگر خطا مربوط به تنظیمات هوش مصنوعی است، به مرحلهٔ اتصال برگرد و دوباره آزمایش کن.`
+        : `Could not create the memory summary: ${reason} If this is an AI configuration error, return to AI setup and test the saved connection again.`);
     } finally { setSummaryBusy(false); }
   }
   async function approveMemory() {
@@ -265,7 +286,7 @@ export default function SetupWizard({
         </div>
         <form className="setup-chat-form" onSubmit={sendInterviewMessage}><textarea value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder={t.writeHere} rows={2} disabled={chatBusy}/><button className="setup-primary" type="submit" disabled={!chatInput.trim() || chatBusy}>{chatBusy ? <RefreshCw size={16} className="setup-spin"/> : <ArrowRight size={16}/>} {t.send}</button></form>
         <div className="setup-interview-actions"><span>{language === "fa" ? `${interviewAnswers} پاسخ ثبت‌شده` : `${interviewAnswers} answers shared`}</span><button type="button" className="setup-primary" onClick={makeMemorySummary} disabled={summaryBusy || interviewAnswers < 1}>{summaryBusy ? <><RefreshCw size={16} className="setup-spin"/>{t.preparing}</> : <><FileText size={16}/>{t.createSummary}</>}</button></div>
-        {error && <div className="setup-error"><CircleHelp size={17}/>{error}</div>}
+        {error && <div className="setup-error"><CircleHelp size={17}/><span>{error}</span><button type="button" className="setup-secondary" onClick={() => { setStage(2); setError(""); setNotice(""); setAiTested(false); }}>{language === "fa" ? "بازگشت به تنظیمات هوش مصنوعی" : "Back to AI setup"}</button></div>}
       </div>}
       {stage === 4 && memoryPreview && !completed && <div className="setup-stage">
         <div className="setup-icon"><FileText size={27}/></div><p className="setup-eyebrow">{t.step} 4 / 4</p><h1>{t.summaryTitle}</h1><p className="setup-subtitle">{t.summarySub}</p>
