@@ -48,9 +48,17 @@ jobs:
           grep -q "package/bin/smart-calendar.js" artifacts/package-files.txt
           grep -q "package/cli.js" artifacts/package-files.txt
           grep -q "package/dist/index.html" artifacts/package-files.txt
-          npm install -g artifacts/smart-calendar-0.1.0.tgz
+          npm install -g ./artifacts/smart-calendar-0.1.0.tgz
           smart-calendar --help
           smart-calendar --version
+          smart-calendar --no-open --port 4178 > /tmp/smart-calendar.log 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:4178/api/health > artifacts/health.json; then break; fi
+            sleep 1
+          done
+          grep -q '"ok":true' artifacts/health.json
         env:
           VITE_GOOGLE_CLIENT_ID: \${{ vars.GOOGLE_CLIENT_ID }}
 
