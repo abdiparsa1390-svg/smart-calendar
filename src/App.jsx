@@ -12,7 +12,7 @@ import {
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 7);
 const EVENTS_KEY = "smart-calendar-events-v1";
 const COLORS = ["#6d72d9", "#24a79b", "#e39c4c", "#de718d", "#6298dd"];
-const blankConfig = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "" };
+const blankConfig = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "", proxyUrl: "", providers: [] };
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 function googleEventToAppEvent(item) {
@@ -202,7 +202,7 @@ export default function App() {
     skipEventPersistRef.current = true;
     eventsHydratedForUserRef.current = account.id;
     setEvents(accountEvents);
-    setConfig({ baseUrl: settingsData.baseUrl || blankConfig.baseUrl, apiKey: "", model: settingsData.model || "" });
+    setConfig({ baseUrl: settingsData.baseUrl || blankConfig.baseUrl, apiKey: "", model: settingsData.model || "", proxyUrl: settingsData.providers?.[0]?.proxyUrl || "", providers: settingsData.providers || [] });
     setApiKeyConfigured(Boolean(settingsData.apiKeyConfigured));
     setAiProviders(Array.isArray(settingsData.providers) ? settingsData.providers : []);
     setUser(account);
@@ -572,14 +572,26 @@ export default function App() {
       setToast(error.message || "Could not save the event.");
     }
   }
+  function buildProvidersPayload() {
+    const current = aiProviders.length ? aiProviders : [{ id: "primary", name: "Primary", baseUrl: config.baseUrl, model: config.model, proxyUrl: config.proxyUrl || "", apiKeyConfigured }];
+    return current.map((p, i) => ({
+      id: p.id || (i ? "provider-" + i : "primary"),
+      name: p.name || (i ? "Backup " + (i + 1) : "Primary"),
+      baseUrl: i === 0 ? config.baseUrl : (p.baseUrl || ""),
+      model: i === 0 ? config.model : (p.model || ""),
+      apiKey: i === 0 ? (config.apiKey || "") : (p.apiKey || ""),
+      proxyUrl: i === 0 ? (config.proxyUrl || p.proxyUrl || "") : (p.proxyUrl || ""),
+      apiKeyConfigured: i === 0 ? apiKeyConfigured : Boolean(p.apiKeyConfigured),
+      enabled: p.enabled !== false
+    }));
+  }
   async function saveConfig(e) {
     e.preventDefault();
     try {
-      const result = await apiFetch("/api/ai/settings", {
-        method: "PUT",
-        body: JSON.stringify(config)
-      });
-      setConfig(previous => ({ ...previous, apiKey: "", baseUrl: result.baseUrl || previous.baseUrl, model: result.model || previous.model }));
+      const providers = buildProvidersPayload();
+      const result = await apiFetch("/api/ai/settings", { method: "PUT", body: JSON.stringify({ providers, fallbackEnabled: true }) });
+      setConfig(previous => ({ ...previous, apiKey: "", proxyUrl: result.providers?.[0]?.proxyUrl || previous.proxyUrl, baseUrl: result.baseUrl || previous.baseUrl, model: result.model || previous.model }));
+      setAiProviders(result.providers || providers.map(p => ({ ...p, apiKey: "", apiKeyConfigured: true })));
       setApiKeyConfigured(Boolean(result.apiKeyConfigured));
       setTestMessage(LOCAL_MODE ? "AI settings saved on this computer." : "AI settings saved to your account.");
       setTestState("success");
@@ -592,23 +604,20 @@ export default function App() {
   }
   async function testConnection(e) {
     e.preventDefault();
-    setTestState("testing");
-    setTestMessage("");
-    if (!config.baseUrl.trim() || !config.model.trim() || (!config.apiKey.trim() && !apiKeyConfigured)) {
+    setTestState("testing"); setTestMessage("");
+    const providers = buildProvidersPayload().filter(p => p.enabled !== false);
+    if (!providers.length || providers.some(p => !p.baseUrl.trim() || !p.model.trim() || (!String(p.apiKey || "").trim() && !p.apiKeyConfigured))) {
       setTestState("error");
-      setTestMessage("Enter the Base URL, API key, and model first.");
+      setTestMessage("Each enabled provider needs a Base URL, model, and API key.");
       return;
     }
     try {
-      const result = await apiFetch("/api/ai/test", {
-        method: "POST",
-        body: JSON.stringify(config)
-      });
+      const result = await apiFetch("/api/ai/test", { method: "POST", body: JSON.stringify({ providers, fallbackEnabled: true }) });
       setTestState("success");
       setTestMessage(result.message || "Connection successful. Your model replied to the test request.");
     } catch (error) {
       setTestState("error");
-      setTestMessage(error.message || "Could not connect. Check the URL, model, and API key.");
+      setTestMessage(error.message || "Could not connect. Check your provider URLs, models, proxy, and API keys.");
     }
   }
   async function handleSignOut() {
@@ -753,7 +762,7 @@ export default function App() {
       setApiKeyConfigured(Boolean(settings.apiKeyConfigured));
       setAiProviders(Array.isArray(settings.providers) ? settings.providers : []);
       const primary = (settings.providers || [])[0] || {};
-      setConfig({ baseUrl: settings.baseUrl || primary.baseUrl || blankConfig.baseUrl, model: settings.model || primary.model || "", apiKey: "" });
+      setConfig({ baseUrl: settings.baseUrl || primary.baseUrl || blankConfig.baseUrl, model: settings.model || primary.model || "", apiKey: "", proxyUrl: primary.proxyUrl || "", providers: settings.providers || [] });
       return;
     }
     if (result?.action === "complete") {
