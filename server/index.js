@@ -154,12 +154,12 @@ function validateAIBaseUrl(value) {
   let url;
   try { url = new URL(String(value || "")); } catch { throw new Error("Enter a valid AI provider Base URL."); }
   if (url.username || url.password || url.search || url.hash) throw new Error("The Base URL must not contain credentials, query parameters, or fragments.");
-  const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-  const isLocal = localHosts.has(url.hostname);
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+  const isLocal = localHosts.has(host);
   if (url.protocol !== "https:" && !(url.protocol === "http:" && !isProduction && isLocal)) {
     throw new Error("Use an HTTPS Base URL for AI providers (HTTP is allowed only for localhost during development).");
   }
-  const host = url.hostname.toLowerCase();
   const allowedDevLoopback = !isProduction && url.protocol === "http:" && isLocal;
   const privateAddress =
     /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
