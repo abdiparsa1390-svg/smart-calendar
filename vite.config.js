@@ -1,9 +1,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const base = process.env.VITE_DEPLOY_TARGET === "infinityfree"
+  ? "/"
+  : process.env.GITHUB_ACTIONS === "true"
+    ? "/smart-calendar/"
+    : "/";
+
 export default defineConfig({
   plugins: [react()],
-  base: process.env.GITHUB_ACTIONS === "true" ? "/smart-calendar/" : "/",
+  base,
   server: {
     proxy: {
       "/api": {
