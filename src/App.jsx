@@ -67,7 +67,7 @@ function dayKey(date) {
 function startOfWeek(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - d.getDay());
+  d.setDate(d.getDate() - (activeLocale() === "fa-IR" ? (d.getDay() + 1) % 7 : d.getDay()));
   return d;
 }
 function sameDay(a, b) {
@@ -790,7 +790,7 @@ export default function App() {
     <main className="app-shell" lang={language} dir={language === "fa" ? "rtl" : "ltr"}>
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><CalendarDays size={21} /></div><span>smart<span className="brand-light">calendar</span></span><span className="beta-tag">BETA</span></div>
-        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><span className="account-email" title={LOCAL_MODE ? "Data stays on this computer" : user.email}>{LOCAL_MODE ? "Local workspace" : user.email}</span><IconButton title={language === "fa" ? "امنیت و حریم خصوصی" : "Security and privacy"} onClick={() => setShowSecurityInfo(true)}><LockKeyhole size={18} /></IconButton><IconButton title={language === "fa" ? "راهنمای راه‌اندازی" : "Setup guide"} onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton>{!LOCAL_MODE && <button type="button" className="account-signout" onClick={handleSignOut}>Sign out</button>}<div className="avatar">{LOCAL_MODE ? "L" : user.email.slice(0, 1).toUpperCase()}</div></div>
+        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> {language === "fa" ? "زمانت را آگاهانه برنامه‌ریزی کن" : "Your time, thoughtfully planned"}</div><span className="account-email" title={LOCAL_MODE ? "Data stays on this computer" : user.email}>{LOCAL_MODE ? "Local workspace" : user.email}</span><IconButton title={language === "fa" ? "امنیت و حریم خصوصی" : "Security and privacy"} onClick={() => setShowSecurityInfo(true)}><LockKeyhole size={18} /></IconButton><IconButton title={language === "fa" ? "راهنمای راه‌اندازی" : "Setup guide"} onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton>{!LOCAL_MODE && <button type="button" className="account-signout" onClick={handleSignOut}>Sign out</button>}<div className="avatar">{LOCAL_MODE ? "L" : user.email.slice(0, 1).toUpperCase()}</div></div>
       </header>
 
       <div className="mobile-switch">
@@ -801,26 +801,26 @@ export default function App() {
       <section className={"workspace" + (setupJustDone ? " workspace-expanded" : "")}>
         <section className={"calendar-panel " + (mobilePanel === "assistant" ? "mobile-hidden" : "")}>
           <div className="calendar-toolbar">
-            <button className="create-button" onClick={() => openNewEvent()}><Plus size={18} /> Create</button>
+            <button className="create-button" onClick={() => openNewEvent()}><Plus size={18} /> {language === "fa" ? "ایجاد" : "Create"}</button>
             <div className="date-navigation">
-              <button className="today-button" onClick={() => setCurrentDate(new Date())}>Today</button>
+              <button className="today-button" onClick={() => setCurrentDate(new Date())}>{language === "fa" ? "امروز" : "Today"}</button>
               <IconButton title="Previous" onClick={() => navigate(-1)}><ChevronLeft size={19} /></IconButton>
               <IconButton title="Next" onClick={() => navigate(1)}><ChevronRight size={19} /></IconButton>
               <h1>{rangeLabel}</h1>
             </div>
-            <div className="view-picker">{["day", "week", "month"].map(option => <button key={option} className={view === option ? "selected" : ""} onClick={() => setView(option)}>{option[0].toUpperCase() + option.slice(1)}</button>)}<IconButton title="Calendar options"><MoreHorizontal size={20} /></IconButton></div>
+            <div className="view-picker">{["day", "week", "month"].map(option => <button key={option} className={view === option ? "selected" : ""} onClick={() => setView(option)}>{language === "fa" ? ({ day: "روز", week: "هفته", month: "ماه" }[option]) : option[0].toUpperCase() + option.slice(1)}</button>)}<IconButton title="Calendar options"><MoreHorizontal size={20} /></IconButton></div>
           </div>
           <div className="calendar-subbar">
-            <div className="calendar-caption"><span className="tiny-calendar"><CalendarDays size={14} /></span> My calendar <ChevronDown size={14} /></div>
+            <div className="calendar-caption"><span className="tiny-calendar"><CalendarDays size={14} /></span> {language === "fa" ? "تقویم من" : "My calendar"} <ChevronDown size={14} /></div>
             <div className="calendar-subbar-right">
-              <div className="calendar-caption muted-caption"><span className="legend-dot" /> Personal <span className="legend-dot teal" /> Focus time</div>
-              {accessToken ? <div className="google-connected-controls"><span className="google-status-label"><span className="google-status-dot" /> Google Calendar</span><button type="button" onClick={() => syncGoogleCalendar()} disabled={googleSyncState === "syncing"} title="Sync the visible date range"><RefreshCw size={13} className={googleSyncState === "syncing" ? "spin" : ""} /> Sync</button><button type="button" onClick={disconnectGoogle}>Disconnect</button></div> : <button type="button" className="google-connect-button" onClick={() => { setGoogleError(""); startGoogleConnect(); }}><CalendarDays size={14} /> Connect Google</button>}
+              <div className="calendar-caption muted-caption"><span className="legend-dot" /> {language === "fa" ? "شخصی" : "Personal"} <span className="legend-dot teal" /> {language === "fa" ? "زمان تمرکز" : "Focus time"}</div>
+              {accessToken ? <div className="google-connected-controls"><span className="google-status-label"><span className="google-status-dot" /> Google Calendar</span><button type="button" onClick={() => syncGoogleCalendar()} disabled={googleSyncState === "syncing"} title="Sync the visible date range"><RefreshCw size={13} className={googleSyncState === "syncing" ? "spin" : ""} /> Sync</button><button type="button" onClick={disconnectGoogle}>Disconnect</button></div> : <button type="button" className="google-connect-button" onClick={() => { setGoogleError(""); startGoogleConnect(); }}><CalendarDays size={14} /> {language === "fa" ? "اتصال گوگل" : "Connect Google"}</button>}
             </div>
           </div>
 
           {view === "month" ? (
             <div className="month-view">
-              <div className="month-weekdays">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => <div key={d}>{d}</div>)}</div>
+              <div className="month-weekdays">{(language === "fa" ? ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"] : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]).map(d => <div key={d}>{d}</div>)}</div>
               <div className="month-cells">{visibleDays.map(day => {
                 const dayEvents = events.filter(event => sameDay(event.start, day));
                 return <button key={dayKey(day)} className={"month-cell " + (day.getMonth() !== currentDate.getMonth() ? "outside-month " : "") + (sameDay(day, new Date()) ? "is-today" : "")} onClick={() => { setCurrentDate(day); setView("day"); }}>
@@ -854,17 +854,17 @@ export default function App() {
               </div>
             </div>
           )}
-          <div className="calendar-footer"><span><span className={"sync-dot " + (accessToken ? "google-sync-dot" : "")} /> {accessToken ? (googleSyncState === "syncing" ? "Syncing Google Calendar…" : googleSyncState === "error" ? "Google sync needs attention" : "Google Calendar connected") : "Your calendar is saved to your account"}</span><span>Local time · Your timezone</span></div>
+          <div className="calendar-footer"><span><span className={"sync-dot " + (accessToken ? "google-sync-dot" : "")} /> {accessToken ? (googleSyncState === "syncing" ? (language === "fa" ? "همگام‌سازی تقویم گوگل…" : "Syncing Google Calendar…") : googleSyncState === "error" ? (language === "fa" ? "همگام‌سازی گوگل نیاز به بررسی دارد" : "Google sync needs attention") : (language === "fa" ? "تقویم گوگل متصل است" : "Google Calendar connected")) : (language === "fa" ? "تقویم در حساب تو ذخیره می‌شود" : "Your calendar is saved to your account")}</span><span>{language === "fa" ? "زمان محلی · منطقه زمانی تو" : "Local time · Your timezone"}</span></div>
         </section>
 
         <aside className={"assistant-panel " + (mobilePanel === "calendar" ? "mobile-hidden" : "") + (setupJustDone ? " assistant-panel-expanded" : "")}>
           <div className="assistant-header">
-            <div className="assistant-title"><div className="assistant-icon"><Sparkles size={19} /></div><div><h2>AI assistant</h2><p>Your planning partner</p></div></div>
+            <div className="assistant-title"><div className="assistant-icon"><Sparkles size={19} /></div><div><h2>{language === "fa" ? "دستیار هوشمند" : "AI assistant"}</h2><p>{language === "fa" ? "همراه برنامه‌ریزی تو" : "Your planning partner"}</p></div></div>
             <div className="assistant-actions"><span className={"connection-indicator " + (isConfigured ? "connected" : "")} title={isConfigured ? "Model settings filled in" : "Model not configured"} /><IconButton title="AI settings" onClick={() => { setTestMessage(""); setTestState("idle"); setShowSettings(true); }}><Settings2 size={18} /></IconButton><IconButton title="New conversation" onClick={() => setMessages([{ id: crypto.randomUUID(), role: "assistant", content: "Fresh page, fresh thoughts. What would you like to plan?" }])}><Plus size={18} /></IconButton></div>
           </div>
-          <div className="assistant-context"><div className="context-icon"><Zap size={16} /></div><div><strong>A little more intentional</strong><span>Make room for what matters today.</span></div><ArrowRight size={16} className="context-arrow" /></div>
+          <div className="assistant-context"><div className="context-icon"><Zap size={16} /></div><div><strong>{language === "fa" ? "آگاهانه‌تر برنامه‌ریزی کنیم" : "A little more intentional"}</strong><span>{language === "fa" ? "برای چیزهای مهم امروز جا باز کن." : "Make room for what matters today."}</span></div><ArrowRight size={16} className="context-arrow" /></div>
           <div className="chat-area">
-            <div className="chat-day-label"><span /> TODAY <span /></div>
+            <div className="chat-day-label"><span /> {language === "fa" ? "امروز" : "TODAY"} <span /></div>
             {messages.map(message => <div key={message.id} className={"message-row " + (message.role === "user" ? "user-row" : "")}>
               {message.role === "assistant" && <div className="message-avatar"><Sparkles size={14} /></div>}
               <div className={"message-bubble " + (message.role === "user" ? "user-bubble" : "assistant-bubble") + (message.isError ? " error-bubble" : "")}>{message.content.split("\n").map((line, i) => line ? <p key={i}>{line}</p> : <div key={i} className="message-space" />)}</div>
@@ -884,12 +884,12 @@ export default function App() {
             <p className="approval-note"><LockKeyhole size={13}/>{language === "fa" ? "تا وقتی تأیید نکنی فایل حافظه تغییر نمی‌کند." : "The memory file stays unchanged until you approve."}</p>
             <div className="approval-buttons"><button type="button" className="secondary-button" onClick={() => approveMemoryProposal(false)}>{language === "fa" ? "نه، ممنون" : "Dismiss"}</button><button type="button" className="primary-button" onClick={() => approveMemoryProposal(true)}><Check size={15}/>{language === "fa" ? "ذخیره در حافظه" : "Approve & save"}</button></div>
           </section>}
-          <div className="suggestion-list"><button onClick={() => setChatInput("Help me plan a focused, balanced day.")}><Sparkles size={14} /> Plan my day</button><button onClick={() => setChatInput("How can I make time for deep work?")}><Clock3 size={14} /> Find focus time</button></div>
+          <div className="suggestion-list"><button onClick={() => setChatInput(language === "fa" ? "برای امروز یک برنامهٔ متمرکز و متعادل پیشنهاد بده." : "Help me plan a focused, balanced day.")}><Sparkles size={14} /> {language === "fa" ? "برنامه‌ریزی امروز" : "Plan my day"}</button><button onClick={() => setChatInput(language === "fa" ? "چطور برای تمرکز عمیق وقت پیدا کنم؟" : "How can I make time for deep work?")}><Clock3 size={14} /> {language === "fa" ? "زمان تمرکز" : "Find focus time"}</button></div>
           <form className="chat-composer" onSubmit={sendMessage}>
-            <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Ask anything about your schedule…" rows={2} aria-label="Message the AI assistant" />
-            <div className="composer-bottom"><span><ShieldCheck size={13} /> Your model, your choice</span><button className="send-button" type="submit" disabled={!chatInput.trim() || sending} aria-label="Send message">{sending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}</button></div>
+            <textarea value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder={language === "fa" ? "دربارهٔ برنامه‌ات هر چیزی بپرس…" : "Ask anything about your schedule…"} rows={2} aria-label="Message the AI assistant" />
+            <div className="composer-bottom"><span><ShieldCheck size={13} /> {language === "fa" ? "مدل انتخابی تو" : "Your model, your choice"}</span><button className="send-button" type="submit" disabled={!chatInput.trim() || sending} aria-label="Send message">{sending ? <RefreshCw size={16} className="spin" /> : <Send size={16} />}</button></div>
           </form>
-          <p className="assistant-footnote">{LOCAL_MODE ? "Your workspace is stored on this computer. AI requests go to the provider you configured." : "Signed in as " + user.email + "."} AI can make mistakes; review important plans.</p>
+          <p className="assistant-footnote">{LOCAL_MODE ? (language === "fa" ? "فضای کاری روی همین رایانه ذخیره می‌شود. درخواست‌های AI به ارائه‌دهندهٔ انتخابی تو می‌روند." : "Your workspace is stored on this computer. AI requests go to the provider you configured.") : (language === "fa" ? "واردشده با " + user.email + "." : "Signed in as " + user.email + ".")} {language === "fa" ? "هوش مصنوعی ممکن است اشتباه کند؛ برنامه‌های مهم را بررسی کن." : "AI can make mistakes; review important plans."}</p>
         </aside>
       </section>
 
