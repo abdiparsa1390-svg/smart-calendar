@@ -39,6 +39,7 @@
 .setup-provider{border:1px solid #e4e6ef;border-radius:16px;padding:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#fcfcfe}
 .setup-provider-heading{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;color:#363852;font-size:12px;padding-bottom:3px}
 .setup-provider label{display:grid;gap:6px;font-size:11px;font-weight:700;color:#696d87}
+.setup-field-hint{display:block;color:#81859c;font-size:10px;font-weight:400;line-height:1.6}
 .setup-provider input{width:100%;border:1px solid #e1e3ed;border-radius:9px;padding:10px 11px;background:#fff;color:#303249;min-width:0;font-size:12px;outline:none}
 .setup-provider input:focus,.setup-chat-form textarea:focus{border-color:#8d90e4;box-shadow:0 0 0 3px #8586db1a}
 .setup-remove{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#c25c69;font-weight:600;font-size:11px}
