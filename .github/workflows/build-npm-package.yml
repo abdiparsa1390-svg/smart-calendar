@@ -38,6 +38,23 @@ jobs:
       - name: Install build dependencies
         run: npm install
 
+      - name: Check whether the unscoped npm name is already registered
+        run: |
+          set +e
+          npm view smart-calendar name --json > /tmp/smart-calendar-npm-name.txt 2>&1
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "The name smart-calendar currently resolves in the npm registry:"
+            cat /tmp/smart-calendar-npm-name.txt
+            echo "::warning::Check package ownership before trying to publish smart-calendar."
+          elif grep -qi "E404" /tmp/smart-calendar-npm-name.txt; then
+            echo "No public smart-calendar package was found at check time."
+          else
+            echo "::warning::Could not conclusively check the npm package name."
+            cat /tmp/smart-calendar-npm-name.txt
+          fi
+
       - name: Build and pack the global CLI
         run: |
           node --check cli.js
