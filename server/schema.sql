@@ -46,3 +46,14 @@ CREATE TABLE IF NOT EXISTS user_events (
 );
 
 CREATE INDEX IF NOT EXISTS user_events_user_start_idx ON user_events (user_id, start_at);
+
+ALTER TABLE ai_settings
+  ADD COLUMN IF NOT EXISTS providers JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+CREATE TABLE IF NOT EXISTS user_memory_files (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL CHECK (file_name IN ('profile.md', 'goals.md', 'preferences.md', 'routines.md', 'planning.md')),
+  content TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, file_name)
+);
