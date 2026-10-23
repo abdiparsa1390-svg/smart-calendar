@@ -639,20 +639,44 @@ export default function App() {
     setChatInput("");
     setSending(true);
     try {
+      const memoryResult = await apiFetch("/api/memory").catch(() => ({ files: {} }));
+      const memoryText = Object.entries(memoryResult.files || {}).map(([name, content]) => name + "\\n" + content).join("\\n\\n");
+      const systemContent = (language === "fa"
+        ? "تو دستیار برنامه‌ریزی شخصی Smart Calendar هستی و فقط فارسی حرف بزن. از حافظهٔ کاربر و رویدادهای تقویم که در ادامه آمده برای پیشنهاد برنامهٔ واقع‌بینانه استفاده کن. هیچ تغییری را مستقیماً اعمال نکن. اگر کاربر برنامه‌ریزی یا تغییر تقویم خواست، پیشنهادهای دقیق را به شکل یک آرایه JSON در تگ <calendar_proposal> بنویس؛ هر مورد باید title,start,end,color,place,action داشته باشد و start/end تاریخ ISO باشند؛ action یکی از create/update/delete است و برای update/delete باید id رویداد موجود را بفرستی. بعد از تگ توضیح بده که تغییرات فقط با تأیید کاربر اعمال می‌شوند. اگر نکتهٔ پایدار و مفیدی دربارهٔ هدف، ترجیح یا عادت کاربر فهمیدی که هنوز در حافظه نیست یا باید اصلاح شود، یک پیشنهاد داخل تگ <memory_proposal> با JSON شامل file (یکی از profile.md, goals.md, preferences.md, routines.md, planning.md)، content (محتوای کامل فایل Markdown) و reason قرار بده و از کاربر اجازه بگیر. هیچ‌وقت ادعا نکن تغییری اعمال یا حافظه‌ای ذخیره شده مگر پس از تأیید کاربر.\n\nحافظهٔ فعلی کاربر:\n"
+        : "You are the personal planning partner in Smart Calendar. Speak only English. Use the user's memory and calendar events to make realistic, sustainable plans. Never apply changes directly. When the user asks to plan or change the calendar, propose precise changes inside a <calendar_proposal> tag containing a JSON array; each item must include title,start,end,color,place,action, with ISO start/end timestamps, and action one of create/update/delete. For update/delete, include the existing event id. Explain that changes are applied only after the user approves. If you learn a durable and useful goal, preference, or routine that is missing from memory or needs updating, include one <memory_proposal> tag with JSON containing file (one of profile.md, goals.md, preferences.md, routines.md, planning.md), content (the full Markdown file text), and reason, then ask permission. Never claim a calendar change or memory update has been applied before the user approves.\n\nCurrent user memory:\n")
+        + (memoryText || (language === "fa" ? "هنوز حافظه‌ای ثبت نشده است." : "No memory files have been saved yet."));
       const data = await apiFetch("/api/ai/chat", {
         method: "POST",
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: "You are the friendly AI assistant in Smart Calendar. For now, discuss scheduling and planning in chat, but you do not have calendar-editing tools. Never claim to have changed calendar events." },
-            ...history.filter(m => m.role === "user" || m.role === "assistant").map(m => ({ role: m.role, content: m.content }))
-          ]
-        })
+        body: JSON.stringify({ messages: [
+          { role: "system", content: systemContent },
+          ...history.filter(m => m.role === "user" || m.role === "assistant").map(m => ({ role: m.role, content: m.content }))
+        ] })
       });
-      const answer = data?.content;
-      if (!answer) throw new Error("The API response did not include an assistant message.");
-      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", content: typeof answer === "string" ? answer : JSON.stringify(answer) }]);
+      const rawAnswer = data?.content;
+      if (!rawAnswer) throw new Error("The API response did not include an assistant message.");
+      let answer = typeof rawAnswer === "string" ? rawAnswer : JSON.stringify(rawAnswer);
+      const calendarMatch = answer.match(/<calendar_proposal>([\\s\\S]*?)<\\/calendar_proposal>/i);
+      if (calendarMatch) {
+        try {
+          const proposal = JSON.parse(calendarMatch[1].trim());
+          setPendingCalendarProposal(Array.isArray(proposal) ? proposal : [proposal]);
+          answer = answer.replace(calendarMatch[0], "").trim();
+        } catch { /* Show malformed proposal text so the user can ask the assistant to restate it. */ }
+      }
+      const memoryMatch = answer.match(/<memory_proposal>([\\s\\S]*?)<\\/memory_proposal>/i);
+      if (memoryMatch) {
+        try {
+          const proposal = JSON.parse(memoryMatch[1].trim());
+          if (["profile.md","goals.md","preferences.md","routines.md","planning.md"].includes(proposal.file) && typeof proposal.content === "string") {
+            setPendingMemoryProposal({ ...proposal });
+            answer = answer.replace(memoryMatch[0], "").trim();
+          }
+        } catch { /* Keep malformed proposal visible rather than silently dropping content. */ }
+      }
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", content: answer || (language === "fa" ? "پیشنهاد آماده است؛ پیش از اعمال، آن را بررسی کن." : "The proposal is ready for your review before anything is applied.") }]);
+      if (data.providerName) setToast((language === "fa" ? "پاسخ از " : "Answered by ") + data.providerName);
     } catch (error) {
-      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", isError: true, content: "I couldn’t reach your model. " + (error.message || "Check your connection settings and try again.") }]);
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", isError: true, content: (language === "fa" ? "به هوش مصنوعی وصل نشدم. " : "I couldn’t reach your model. ") + (error.message || "Check your connection settings and try again.") }]);
     } finally { setSending(false); }
   }
 
@@ -689,7 +713,7 @@ export default function App() {
     <main className="app-shell">
       <header className="topbar">
         <div className="brand"><div className="brand-mark"><CalendarDays size={21} /></div><span>smart<span className="brand-light">calendar</span></span><span className="beta-tag">BETA</span></div>
-        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><span className="account-email" title={LOCAL_MODE ? "Data stays on this computer" : user.email}>{LOCAL_MODE ? "Local workspace" : user.email}</span><IconButton title="Setup guide" onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton>{!LOCAL_MODE && <button type="button" className="account-signout" onClick={handleSignOut}>Sign out</button>}<div className="avatar">{LOCAL_MODE ? "L" : user.email.slice(0, 1).toUpperCase()}</div></div>
+        <div className="topbar-actions"><div className="today-date"><span className="date-dot" /> Your time, thoughtfully planned</div><span className="account-email" title={LOCAL_MODE ? "Data stays on this computer" : user.email}>{LOCAL_MODE ? "Local workspace" : user.email}</span><IconButton title={language === "fa" ? "امنیت و حریم خصوصی" : "Security and privacy"} onClick={() => setShowSecurityInfo(true)}><LockKeyhole size={18} /></IconButton><IconButton title={language === "fa" ? "راهنمای راه‌اندازی" : "Setup guide"} onClick={() => { setOnboardingStep(0); setShowOnboarding(true); }}><CircleHelp size={19} /></IconButton>{!LOCAL_MODE && <button type="button" className="account-signout" onClick={handleSignOut}>Sign out</button>}<div className="avatar">{LOCAL_MODE ? "L" : user.email.slice(0, 1).toUpperCase()}</div></div>
       </header>
 
       <div className="mobile-switch">
@@ -756,7 +780,7 @@ export default function App() {
           <div className="calendar-footer"><span><span className={"sync-dot " + (accessToken ? "google-sync-dot" : "")} /> {accessToken ? (googleSyncState === "syncing" ? "Syncing Google Calendar…" : googleSyncState === "error" ? "Google sync needs attention" : "Google Calendar connected") : "Your calendar is saved to your account"}</span><span>Local time · Your timezone</span></div>
         </section>
 
-        <aside className={"assistant-panel " + (mobilePanel === "calendar" ? "mobile-hidden" : "")}>
+        <aside className={"assistant-panel " + (mobilePanel === "calendar" ? "mobile-hidden" : "") + (setupJustDone ? " assistant-panel-expanded" : "")}>
           <div className="assistant-header">
             <div className="assistant-title"><div className="assistant-icon"><Sparkles size={19} /></div><div><h2>AI assistant</h2><p>Your planning partner</p></div></div>
             <div className="assistant-actions"><span className={"connection-indicator " + (isConfigured ? "connected" : "")} title={isConfigured ? "Model settings filled in" : "Model not configured"} /><IconButton title="AI settings" onClick={() => { setTestMessage(""); setTestState("idle"); setShowSettings(true); }}><Settings2 size={18} /></IconButton><IconButton title="New conversation" onClick={() => setMessages([{ id: crypto.randomUUID(), role: "assistant", content: "Fresh page, fresh thoughts. What would you like to plan?" }])}><Plus size={18} /></IconButton></div>
@@ -826,6 +850,18 @@ export default function App() {
             {accessToken && <div className="test-message test-success"><Check size={16} /><span>Google Calendar is connected for this session. For security, the access token is kept in memory only.</span></div>}
             <div className="security-note"><ShieldCheck size={17}/><span><strong>Your permission</strong> — Smart Calendar can read, create, edit, and delete events on your primary calendar. You can disconnect it at any time.</span></div>
             <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowGoogleModal(false)}>Cancel</button>{GOOGLE_CLIENT_ID && <button type="button" className="primary-button" onClick={startGoogleConnect} disabled={!googleSdkReady}><CalendarDays size={16} /> {googleSdkReady ? "Continue with Google" : "Loading Google sign-in…"}</button>}</div>
+          </div>
+        </section>
+      </div>}
+      {showSecurityInfo && <div className="modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setShowSecurityInfo(false); }}>
+        <section className="settings-modal security-info-modal" role="dialog" aria-modal="true" aria-labelledby="security-info-title">
+          <div className="modal-header"><div className="modal-heading-icon"><LockKeyhole size={20}/></div><div><h2 id="security-info-title">{language === "fa" ? "امنیت و حریم خصوصی" : "Security and privacy"}</h2><p>{language === "fa" ? "کنترل‌ها و محدودیت‌های امنیتی Smart Calendar" : "What Smart Calendar does to protect your workspace"}</p></div><IconButton title="Close security details" onClick={() => setShowSecurityInfo(false)}><X size={19}/></IconButton></div>
+          <div className="settings-form">
+            <div className="security-note"><ShieldCheck size={18}/><span><strong>{language === "fa" ? "کلیدهای هوش مصنوعی" : "AI provider keys"}</strong> — {language === "fa" ? "کلیدها در حالت ذخیره رمزگذاری می‌شوند و مرورگر دوباره آن‌ها را دریافت نمی‌کند." : "Keys are encrypted at rest and are not sent back to the browser after saving."}</span></div>
+            <div className="security-note"><CalendarDays size={18}/><span><strong>{language === "fa" ? "تقویم گوگل" : "Google Calendar"}</strong> — {language === "fa" ? "توکن دسترسی فقط تا پایان این نشست در حافظه نگه داشته می‌شود." : "The Google access token is kept in memory for this session only."}</span></div>
+            <div className="security-note"><Check size={18}/><span><strong>{language === "fa" ? "تأیید قبل از اجرا" : "Approval before action"}</strong> — {language === "fa" ? "پیشنهادهای تقویم و تغییرات حافظه بدون تأیید تو ذخیره یا اجرا نمی‌شوند." : "Calendar proposals and memory updates are not applied without your approval."}</span></div>
+            <p className="assistant-footnote">{language === "fa" ? "این علامت به معنی تضمین مطلق امنیت نیست؛ کلیدها و حساب‌های متصل خود را هم محافظت کن." : "The lock icon is a reminder of these safeguards, not a guarantee of absolute security. Protect your connected accounts and API keys."}</p>
+            <div className="modal-actions"><button type="button" className="primary-button" onClick={() => setShowSecurityInfo(false)}>{language === "fa" ? "متوجه شدم" : "Got it"}</button></div>
           </div>
         </section>
       </div>}
