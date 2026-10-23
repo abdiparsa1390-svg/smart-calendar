@@ -192,7 +192,11 @@ export default function App() {
         start: event.start.toISOString(),
         end: event.end.toISOString(),
         color: event.color || COLORS[0],
-        place: event.place || ""
+        place: event.place || "",
+        location: event.location || "",
+        allDay: Boolean(event.allDay),
+        reminderMinutes: event.reminderMinutes ?? 10,
+        recurrence: event.recurrence || "none"
       }));
       apiFetch("/api/events", { method: "PUT", body: JSON.stringify({ events: localEvents }) })
         .catch(error => setToast("Could not save your calendar: " + error.message));
@@ -542,9 +546,10 @@ export default function App() {
     const parts = draft.date.split("-").map(Number);
     const s = draft.start.split(":").map(Number);
     const t = draft.end.split(":").map(Number);
-    const start = new Date(parts[0], parts[1] - 1, parts[2], s[0], s[1]);
-    const end = new Date(parts[0], parts[1] - 1, parts[2], t[0], t[1]);
-    if (end <= start) { setToast("End time must be after start time."); return; }
+    const start = new Date(parts[0], parts[1] - 1, parts[2], draft.allDay ? 0 : s[0], draft.allDay ? 0 : s[1]);
+    const end = draft.allDay ? new Date(start) : new Date(parts[0], parts[1] - 1, parts[2], t[0], t[1]);
+    if (draft.allDay) end.setDate(end.getDate() + 1);
+    if (end <= start) { setToast(language === "fa" ? "زمان پایان باید بعد از شروع باشد." : "End time must be after start time."); return; }
     const existing = events.find(event => event.id === editingEventId);
     try {
       if (existing?.source === "google") {
@@ -560,17 +565,17 @@ export default function App() {
           googlePayloadFromDraft(draft, start, end),
           accessToken
         );
-        setEvents(previous => previous.map(event => event.id === existing.id ? googleEventToAppEvent(updated) : event));
+        setEvents(previous => previous.map(event => event.id === existing.id ? { ...googleEventToAppEvent(updated), color: draft.color } : event));
         setToast("Google Calendar event updated");
-      } else if (!existing && accessToken) {
+      } else if (accessToken) {
         const created = await googleApiRequest(
           "/calendars/primary/events",
           "POST",
           googlePayloadFromDraft(draft, start, end),
           accessToken
         );
-        setEvents(previous => [...previous, googleEventToAppEvent(created)]);
-        setToast("Event added to Google Calendar");
+        setEvents(previous => [...previous.filter(event => event.id !== existing?.id), { ...googleEventToAppEvent(created), color: draft.color }]);
+        setToast(language === "fa" ? "رویداد به تقویم گوگل اضافه شد." : "Event added to Google Calendar");
       } else if (existing) {
         setEvents(previous => previous.map(event => event.id === existing.id ? { ...event, ...draft, title: draft.title.trim(), start, end } : event));
         setToast("Event updated");
