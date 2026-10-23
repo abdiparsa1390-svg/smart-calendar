@@ -1,59 +1,76 @@
 # Smart Calendar
 
-A responsive calendar workspace with an AI chat panel beside it.
+A calendar workspace with an AI assistant, individual accounts, email verification, and per-user settings.
 
 ## Features
 
-- Day, week, and month views.
-- Create calendar events with a title, date, time, notes, and color.
-- Click an event to edit it. Right-click on desktop or press and hold on touch devices to edit, delete, or open a Google event.
-- One-click Google Calendar connection: users click **Connect Google**, choose their Google account, and approve access. No OAuth setup or Client ID entry is required from individual users.
-- Google Calendar events sync for the visible date range; creating, editing, and deleting synced events writes back to Google Calendar.
-- Configure any OpenAI-compatible Chat Completions provider using a Base URL, API key, and model ID.
-- Local-only events and AI provider settings are saved in this browser.
+- Email/password registration, email verification, sign-in, and sign-out.
+- PostgreSQL-backed accounts and calendar events, separated by user.
+- Each account has its own OpenAI-compatible API Base URL, model, and API key.
+- AI API keys are encrypted with AES-256-GCM on the backend and are never returned to the browser after saving.
+- AI chat and connection tests go through the authenticated backend rather than exposing the API key in browser requests.
+- Gmail SMTP verification emails are sent by the backend using environment variables only.
+- Google Calendar OAuth integration is optional and uses the site's OAuth Client ID, not an ID entered by every user.
 
-## Run locally
+## Important hosting note
 
-Requires Node.js and npm.
+GitHub Pages can host the frontend only. It cannot run the Express backend, access PostgreSQL, or send verification emails. The account and email features become functional only after the backend is running and the frontend is configured with its API URL. The repository contains both the frontend and the backend so they can be deployed together when you move to a server.
 
-```bash
-npm install
-npm run dev
-```
+For a production deployment, hosting the frontend and API on the same site/domain (for example, `app.example.com` and `app.example.com/api` behind a reverse proxy) is recommended. If they are on separate sites, configure the API origin and secure cross-site cookies carefully; some browsers block third-party cookies.
 
-Create a production build with:
+## Local development on Windows
 
-```bash
-npm run build
-npm run preview
-```
+You need Node.js 20+, PostgreSQL, and a newly generated Gmail App Password (or preferably a configured Gmail OAuth 2.0 SMTP transport for a production service).
 
-## One-time Google Calendar setup for the site owner
+1. Create a PostgreSQL database named `smart_calendar`, or update the database URL to your existing database.
+2. Copy `server/.env.example` to `server/.env`:
 
-This setup is completed once for Smart Calendar, not by every user.
+   ```cmd
+   copy server\.env.example server\.env
+   ```
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/), create or select a project, and enable **Google Calendar API**.
-2. Configure the OAuth consent screen. Add your own Google account as a test user while the app is in testing.
-3. Under APIs & Services → Credentials, create an **OAuth Client ID** of type **Web application**.
-4. Under **Authorized JavaScript origins**, add `https://abdiparsa1390-svg.github.io`. For local development, add `http://localhost:5173` as well if needed.
-5. In this GitHub repository, open **Settings → Secrets and variables → Actions → Variables**. Create a repository variable named `GOOGLE_CLIENT_ID` and set its value to the OAuth Client ID. The Client ID is designed to be public in browser apps; do not add a Google Client Secret to the frontend.
-6. Trigger **Build and publish Smart Calendar** from the Actions tab (or push a new commit) so the site is rebuilt with the setting.
-7. For public use, review the OAuth consent-screen publishing and verification requirements for Google Calendar scopes. While the app remains in testing, only configured test users can connect.
+3. Edit `server/.env`. Set `DATABASE_URL`, `SMTP_USER`, `SMTP_APP_PASSWORD`, `EMAIL_FROM`, and `FRONTEND_URL`. Generate an encryption key with:
 
-After this one-time setup, the **Connect Google** button opens Google's account/permission flow directly. Users don't need to visit Google Cloud or enter any IDs.
+   ```cmd
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
 
-## Configure the AI provider
+   Put the resulting 64-character hex value in `APP_ENCRYPTION_KEY`. Keep this value stable and private: losing it prevents previously encrypted API keys from being decrypted.
 
-Open **AI settings** in the assistant panel and enter:
+4. Install dependencies and start the front end and API:
 
-- **Base URL** — for example, `https://api.openai.com/v1`, or your compatible provider's base URL.
-- **API key** — the credential issued by your provider.
-- **Model name** — the exact model ID supported by your provider.
+   ```cmd
+   npm install
+   npm --prefix server install
+   npm run dev:all
+   ```
 
-The app sends a request to `/chat/completions` relative to the configured Base URL. Some API providers may block direct browser requests through CORS; a backend proxy may be required.
+5. Open `http://localhost:5173`. The API listens on port 3001 and the Vite development server proxies `/api` to it. On first run, the API creates its tables in the configured PostgreSQL database.
 
-## Security and limitations
+For Gmail SMTP, use `smtp.gmail.com` with port `587` and STARTTLS. Put the App Password in `server/.env` only; never commit it or add it to frontend build variables. Gmail App Passwords require 2-Step Verification and should be revoked if exposed. For more serious public use, prefer OAuth 2.0 or a transactional email provider rather than a personal Gmail mailbox.
 
-This is a browser-only prototype. The AI API key is saved in local browser storage and requests are made directly from the browser; for a public production app, use a backend service or server-side proxy to keep AI API credentials out of client code. Do not use a personal or sensitive API key in a public deployment.
+## Deploying
 
-Google OAuth access tokens are held in memory and need to be requested again in a later session. The AI chat can discuss scheduling, but it does not yet have tools to create, edit, or delete calendar events through conversation. Use the calendar interface for those changes.
+Deploy the `server/` directory to a Node.js hosting service with a PostgreSQL database. Configure the environment variables from `server/.env.example` in that service's private environment, and set:
+
+- `FRONTEND_URL`: the public frontend URL including the app path, for verification links.
+- `FRONTEND_ORIGINS`: the exact browser origin(s), comma-separated, with no paths.
+- `COOKIE_SAME_SITE`: `lax` when frontend and API are same-site; for cross-site hosting it may need to be `none` with HTTPS enabled.
+- `TRUST_PROXY=true` when using a trusted reverse proxy.
+
+In GitHub repository **Settings → Secrets and variables → Actions → Variables**, set `API_BASE_URL` to the public API base URL (for example, `https://api.example.com`). The workflow injects it as `VITE_API_BASE_URL` during the frontend build. Also configure `GOOGLE_CLIENT_ID` there if you use the Google Calendar integration. Do not put SMTP credentials, database passwords, encryption keys, AI keys, or Google client secrets in GitHub Actions variables; keep server secrets in the backend host's secret/environment manager.
+
+## Google Calendar
+
+The browser frontend uses the configured site OAuth Client ID to start Google authorization. Configure the OAuth consent screen and Authorized JavaScript origin in Google Cloud, enable Google Calendar API, and follow Google's requirements for testing/publishing calendar scopes. Users should only have to click **Connect Google** and approve access; they should not have to create their own OAuth client.
+
+## Authentication and data model
+
+- Passwords are hashed with Node.js scrypt; passwords are never stored in plaintext.
+- Verification and session tokens are random and stored only as SHA-256 hashes.
+- Sessions use an HTTP-only cookie and are stored in PostgreSQL.
+- Individual AI API keys are encrypted at rest using AES-256-GCM.
+- Account-scoped settings and events are isolated by authenticated user ID.
+- Email verification tokens expire after 30 minutes; sign-in is blocked until verification succeeds.
+
+This is a starting point, not a completed production SaaS security audit. Before public launch, add account recovery, monitoring, automated tests, backup/restore procedures, email delivery monitoring, and review the deployment cookie/CORS configuration.
