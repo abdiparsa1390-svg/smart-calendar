@@ -139,7 +139,27 @@ export default function SetupWizard({
         setAiTested(false);
       }
     } catch (e) {
-      setError(e.message || (language === "fa" ? "اتصال هوش مصنوعی ناموفق بود." : "The AI connection test failed."));
+      const raw = e.message || (language === "fa" ? "اتصال هوش مصنوعی ناموفق بود." : "The AI connection test failed.");
+      const message = language === "fa"
+        ? raw
+          .replace(/All AI providers failed\\./g, "همهٔ ارائه‌دهندگان هوش مصنوعی ناموفق بودند.")
+          .replace(/HTTP 401/g, "خطای ۴۰۱: کلید API پذیرفته نشد")
+          .replace(/HTTP 402/g, "خطای ۴۰۲: اعتبار یا روش پرداخت حساب را بررسی کن")
+          .replace(/HTTP 403/g, "خطای ۴۰۳: دسترسی به مدل مجاز نیست")
+          .replace(/HTTP 404/g, "خطای ۴۰۴: آدرس API یا شناسهٔ مدل پیدا نشد")
+          .replace(/HTTP 429/g, "خطای ۴۲۹: محدودیت تعداد درخواست‌ها")
+          .replace(/Model ID is missing/g, "شناسهٔ مدل وارد نشده")
+          .replace(/API key is missing/g, "کلید API وارد نشده")
+          .replace(/The API key was rejected/g, "کلید API توسط ارائه‌دهنده رد شد")
+          .replace(/Check the model ID and request format\\./g, "شناسهٔ مدل و قالب درخواست را بررسی کن.")
+          .replace(/Endpoint or model not found\\./g, "آدرس API یا شناسهٔ مدل پیدا نشد.")
+          .replace(/The account may need credits or a payment method\\./g, "ممکن است حساب به اعتبار یا روش پرداخت نیاز داشته باشد.")
+          .replace(/Access denied\\./g, "دسترسی به مدل مجاز نیست.")
+          .replace(/Rate limit reached\\./g, "محدودیت تعداد درخواست‌ها فعال شده است.")
+          .replace(/Could not connect to API\\./g, "اتصال به API برقرار نشد.")
+          .replace(/Request timed out after 35 seconds\\./g, "درخواست پس از ۳۵ ثانیه بی‌پاسخ ماند.")
+        : raw;
+      setError(message);
     } finally { setSavingAI(false); }
   }
   const interviewSystem = language === "fa"
