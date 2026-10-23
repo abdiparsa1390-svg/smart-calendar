@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./enhancements.css";
 import AuthGate from "./AuthGate.jsx";
+import SetupWizard from "./SetupWizard.jsx";
 import { API_AVAILABLE, LOCAL_MODE, apiFetch } from "./api.js";
 import {
   ArrowRight, Bot, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight,
-  CircleHelp, Clock3, Eye, EyeOff, ListTodo, MessageSquare, MoreHorizontal,
+  CircleHelp, Clock3, Eye, EyeOff, ListTodo, MessageSquare, MoreHorizontal, LockKeyhole, FileText,
   Plus, RefreshCw, Send, Settings2, ShieldCheck, Sparkles, X, Zap
 } from "lucide-react";
 
@@ -72,11 +73,12 @@ function startOfWeek(date) {
 function sameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
+function activeLocale() { try { return localStorage.getItem("smart-calendar-language") === "fa" ? "fa-IR" : "en-US"; } catch { return "en-US"; } }
 function dateText(date, options = { month: "short", day: "numeric" }) {
-  return new Intl.DateTimeFormat("en-US", options).format(date);
+  return new Intl.DateTimeFormat(activeLocale(), options).format(date);
 }
 function timeText(date) {
-  return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).replace(":00", "");
+  return date.toLocaleTimeString(activeLocale(), { hour: "numeric", minute: "2-digit" }).replace(":00", "");
 }
 function dateAt(base, offset, hour, minute = 0) {
   const d = new Date(base);
@@ -117,6 +119,13 @@ export default function App() {
   const [authStatus, setAuthStatus] = useState("checking");
   const [user, setUser] = useState(null);
   const [authNotice, setAuthNotice] = useState("");
+  const [language, setLanguage] = useState(() => { try { return localStorage.getItem("smart-calendar-language") || "en"; } catch { return "en"; } });
+  const [setupComplete, setSetupComplete] = useState(() => { try { return localStorage.getItem("smart-calendar-setup-complete") === "yes"; } catch { return false; } });
+  const [setupJustDone, setSetupJustDone] = useState(false);
+  const [aiProviders, setAiProviders] = useState([]);
+  const [showSecurityInfo, setShowSecurityInfo] = useState(false);
+  const [pendingCalendarProposal, setPendingCalendarProposal] = useState(null);
+  const [pendingMemoryProposal, setPendingMemoryProposal] = useState(null);
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const eventsHydratedForUserRef = useRef(null);
   const skipEventPersistRef = useRef(false);
@@ -195,6 +204,7 @@ export default function App() {
     setEvents(accountEvents);
     setConfig({ baseUrl: settingsData.baseUrl || blankConfig.baseUrl, apiKey: "", model: settingsData.model || "" });
     setApiKeyConfigured(Boolean(settingsData.apiKeyConfigured));
+    setAiProviders(Array.isArray(settingsData.providers) ? settingsData.providers : []);
     setUser(account);
     setAuthNotice("");
     setAuthStatus("authenticated");
@@ -646,8 +656,33 @@ export default function App() {
     } finally { setSending(false); }
   }
 
+  function handleSetupComplete(result) {
+    if (result?.action === "ai-saved") {
+      const settings = result.settings || {};
+      setApiKeyConfigured(Boolean(settings.apiKeyConfigured));
+      setAiProviders(Array.isArray(settings.providers) ? settings.providers : []);
+      const primary = (settings.providers || [])[0] || {};
+      setConfig({ baseUrl: settings.baseUrl || primary.baseUrl || blankConfig.baseUrl, model: settings.model || primary.model || "", apiKey: "" });
+      return;
+    }
+    if (result?.action === "complete") {
+      setLanguage(result.language || "en");
+      setSetupComplete(true);
+      setSetupJustDone(true);
+      setConfig(result.config || blankConfig);
+      setApiKeyConfigured(true);
+      setAiProviders(result.config?.providers || aiProviders);
+      setMessages(result.messages?.length ? result.messages : [{ id: crypto.randomUUID(), role: "assistant", content: result.language === "fa" ? "سلام! حالا که با هم آشنا شدیم، دوست داری اول چه چیزی را برنامه‌ریزی کنیم؟" : "Hi! Now that we have met, what would you like us to plan first?" }]);
+      setMobilePanel("assistant");
+      setShowOnboarding(false);
+    }
+  }
+
   if (authStatus !== "authenticated" || !user) {
     return <AuthGate status={authStatus} message={authNotice} onMessage={setAuthNotice} onAuthenticated={establishSession} />;
+  }
+  if (!setupComplete || !accessToken) {
+    return <SetupWizard accessToken={accessToken} googleError={googleError} googleSdkReady={googleSdkReady} startGoogleConnect={startGoogleConnect} initialSetupComplete={setupComplete} onComplete={handleSetupComplete} onResume={() => { setShowOnboarding(false); setLanguage(activeLocale() === "fa-IR" ? "fa" : "en"); }} />;
   }
 
   return (
