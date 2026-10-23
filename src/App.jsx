@@ -386,6 +386,7 @@ export default function App() {
   }, [currentDate, view, visibleDays]);
 
   const isConfigured = Boolean(config.baseUrl.trim() && (config.apiKey.trim() || apiKeyConfigured) && config.model.trim());
+  const googleVerified = Boolean(accessToken && googleSyncState === "success");
 
   function navigate(direction) {
     setCurrentDate(prev => {
@@ -812,8 +813,8 @@ export default function App() {
   if (authStatus !== "authenticated" || !user) {
     return <AuthGate status={authStatus} message={authNotice} onMessage={setAuthNotice} onAuthenticated={establishSession} />;
   }
-  if (!setupComplete || !accessToken) {
-    return <SetupWizard accessToken={accessToken} googleError={googleError} googleSdkReady={googleSdkReady} startGoogleConnect={startGoogleConnect} initialSetupComplete={setupComplete} onComplete={handleSetupComplete} onResume={() => { setShowOnboarding(false); setLanguage(activeLocale() === "fa-IR" ? "fa" : "en"); }} />;
+  if (!setupComplete || !googleVerified) {
+    return <SetupWizard accessToken={accessToken} googleVerified={googleVerified} googleError={googleError} googleSdkReady={googleSdkReady} startGoogleConnect={startGoogleConnect} initialSetupComplete={setupComplete} onComplete={handleSetupComplete} onResume={() => { setShowOnboarding(false); setLanguage(activeLocale() === "fa-IR" ? "fa" : "en"); }} />;
   }
 
   return (
