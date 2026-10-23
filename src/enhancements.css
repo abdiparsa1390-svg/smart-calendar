@@ -88,3 +88,54 @@
 .security-lock-button:hover{background:#eef9f4;border-color:#bfe5d6}
 @media(max-width:580px){.topbar-actions .security-lock-button{display:inline-flex;width:30px;height:30px}.event-extras-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.event-extras-grid label{display:flex;flex-direction:column;gap:7px;min-width:0;color:#85879b;font-size:10px}.event-extras-grid select{width:100%;min-width:0;border:1px solid #e6e7f0;border-radius:9px;padding:9px 8px;background:#fff;color:#4e5064;font-size:11px}.event-all-day{justify-content:flex-start;gap:10px}.event-all-day input[type=checkbox]{width:16px;height:16px;accent-color:#686acf}.event-all-day span{color:#656982;font-size:12px}}
 @media(min-width:581px){.event-extras-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.event-extras-grid label{display:flex;flex-direction:column;gap:7px;min-width:0;color:#85879b;font-size:11px}.event-extras-grid select{width:100%;min-width:0;border:1px solid #e6e7f0;border-radius:9px;padding:10px 9px;background:#fff;color:#4e5064;font-size:12px}.event-all-day{justify-content:flex-start;gap:10px}.event-all-day input[type=checkbox]{width:16px;height:16px;accent-color:#686acf}.event-all-day span{color:#656982;font-size:12px}}
+
+
+/* UI hardening: responsive overflow, keyboard focus, and readable form controls. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid rgba(100, 102, 210, .55);
+  outline-offset: 2px;
+}
+:where(input, select, textarea, button) { font: inherit; }
+:where(input, select, textarea) { max-width: 100%; }
+:where(.modal, .settings-modal, .google-modal, .setup-stage, .setup-card) {
+  min-width: 0;
+  max-width: 100%;
+}
+:where(.modal, .settings-modal, .google-modal) {
+  max-height: min(88dvh, 860px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+:where(.calendar-grid, .calendar-day, .workspace, .assistant-panel, .chat-area) {
+  min-width: 0;
+}
+:where(.event-title, .event-description, .chat-message, .setup-error, .setup-notice) {
+  overflow-wrap: anywhere;
+}
+:where(button, .primary-button, .secondary-button) {
+  touch-action: manipulation;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+@media (max-width: 620px) {
+  :where(.modal, .settings-modal, .google-modal) {
+    width: calc(100vw - 24px);
+    margin-inline: 12px;
+    max-height: 90dvh;
+  }
+  :where(.modal-actions, .approval-buttons) {
+    flex-wrap: wrap;
+  }
+  :where(.modal-actions button, .approval-buttons button) {
+    min-height: 42px;
+  }
+  :where(input, select, textarea) {
+    font-size: max(16px, 1em);
+  }
+}
