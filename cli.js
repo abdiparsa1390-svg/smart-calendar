@@ -47,12 +47,19 @@ function privateIp(ip){
  if(net.isIPv6(ip)){const s=ip.toLowerCase();return s==="::"||s==="::1"||s.startsWith("fc")||s.startsWith("fd")||s.startsWith("fe8")||s.startsWith("fe9")||s.startsWith("fea")||s.startsWith("feb")||s.startsWith("::ffff:")||!/^(2|3)/.test(s)}return true;
 }
 async function validateBase(input){
- let u;try{u=new URL(String(input||"").trim())}catch{throw Object.assign(Error("Enter a valid HTTPS AI provider Base URL."),{statusCode:400})}
- if(u.protocol!=="https:"||!u.hostname||u.username||u.password||u.search||u.hash)throw Object.assign(Error("Use an HTTPS Base URL without credentials, query parameters, or fragments."),{statusCode:400});
+ let u;
+ try{u=new URL(String(input||"").trim())}
+ catch{throw Object.assign(Error("Enter a valid AI provider Base URL, such as https://api.openai.com/v1."),{statusCode:400})}
+ if(!u.hostname)throw Object.assign(Error("The AI provider Base URL must include a hostname."),{statusCode:400});
+ if(u.username||u.password)throw Object.assign(Error("The Base URL must not include a username or password. Enter only the provider endpoint."),{statusCode:400});
+ if(u.search||u.hash)throw Object.assign(Error("The Base URL must not include query parameters or a fragment. Remove the ?query or #fragment from the URL."),{statusCode:400});
  const host=u.hostname.toLowerCase().replace(/^\[|\]$/g,"").replace(/\.$/,"");
- if(host==="localhost"||!host.includes(".")||host.endsWith(".local")||host.endsWith(".localhost")||host.endsWith(".internal")||host==="metadata.google.internal"||net.isIP(host))throw Object.assign(Error("Private, local, or IP-address endpoints are not allowed."),{statusCode:400});
+ const isLoopback=host==="localhost"||host==="127.0.0.1"||host==="::1";
+ if(u.protocol!=="https:"&&!(u.protocol==="http:"&&isLoopback))throw Object.assign(Error("Use HTTPS for remote AI providers. HTTP is allowed only for localhost, 127.0.0.1, or ::1. A proxy is not required."),{statusCode:400});
+ if(isLoopback)return u.toString().replace(/\/+$/,"");
+ if(!host.includes(".")||host.endsWith(".local")||host.endsWith(".localhost")||host.endsWith(".internal")||host==="metadata.google.internal"||net.isIP(host))throw Object.assign(Error("Private, local, or IP-address endpoints are not allowed here. Use a public HTTPS provider hostname, or use HTTP only on localhost."),{statusCode:400});
  try{const ips=await dns.lookup(host,{all:true,verbatim:true});if(!ips.length||ips.some(x=>privateIp(x.address)))throw Object.assign(Error("The AI provider hostname resolves to a private or reserved address."),{statusCode:400})}
- catch(e){if(e.statusCode)throw e;throw Object.assign(Error("Could not verify the AI provider hostname. Check the Base URL."),{statusCode:400})}
+ catch(e){if(e.statusCode)throw e;throw Object.assign(Error("Could not verify the AI provider hostname. Check the Base URL and your DNS connection."),{statusCode:400})}
  return u.toString().replace(/\/+$/,"");
 }
 function providerViews(s){
