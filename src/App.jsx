@@ -397,7 +397,7 @@ export default function App() {
     try {
       if (event.source === "google") {
         if (!accessToken) {
-          setGoogleClientIdDraft(googleClientId);
+          
           setGoogleError("Reconnect Google Calendar to delete this event.");
           setShowGoogleModal(true);
           return;
@@ -408,7 +408,7 @@ export default function App() {
       setShowEventModal(false);
       setToast(event.source === "google" ? "Event deleted from Google Calendar" : "Event deleted");
     } catch (error) {
-      if (error.status === 401) { setAccessToken(""); setGoogleClientIdDraft(googleClientId); setShowGoogleModal(true); }
+      if (error.status === 401) { setAccessToken("");  setShowGoogleModal(true); }
       setToast(error.message || "Could not delete the event.");
     }
   }
@@ -425,7 +425,7 @@ export default function App() {
     try {
       if (existing?.source === "google") {
         if (!accessToken) {
-          setGoogleClientIdDraft(googleClientId);
+          
           setGoogleError("Reconnect Google Calendar to save changes to this event.");
           setShowGoogleModal(true);
           return;
@@ -459,7 +459,7 @@ export default function App() {
       setShowEventModal(false);
       setEditingEventId(null);
     } catch (error) {
-      if (error.status === 401) { setAccessToken(""); setGoogleClientIdDraft(googleClientId); setShowGoogleModal(true); }
+      if (error.status === 401) { setAccessToken("");  setShowGoogleModal(true); }
       setToast(error.message || "Could not save the event.");
     }
   }
@@ -566,7 +566,7 @@ export default function App() {
             <div className="calendar-caption"><span className="tiny-calendar"><CalendarDays size={14} /></span> My calendar <ChevronDown size={14} /></div>
             <div className="calendar-subbar-right">
               <div className="calendar-caption muted-caption"><span className="legend-dot" /> Personal <span className="legend-dot teal" /> Focus time</div>
-              {accessToken ? <div className="google-connected-controls"><span className="google-status-label"><span className="google-status-dot" /> Google Calendar</span><button type="button" onClick={() => syncGoogleCalendar()} disabled={googleSyncState === "syncing"} title="Sync the visible date range"><RefreshCw size={13} className={googleSyncState === "syncing" ? "spin" : ""} /> Sync</button><button type="button" onClick={disconnectGoogle}>Disconnect</button></div> : <button type="button" className="google-connect-button" onClick={() => { setGoogleClientIdDraft(googleClientId); setGoogleError(""); setShowGoogleModal(true); }}><CalendarDays size={14} /> Connect Google</button>}
+              {accessToken ? <div className="google-connected-controls"><span className="google-status-label"><span className="google-status-dot" /> Google Calendar</span><button type="button" onClick={() => syncGoogleCalendar()} disabled={googleSyncState === "syncing"} title="Sync the visible date range"><RefreshCw size={13} className={googleSyncState === "syncing" ? "spin" : ""} /> Sync</button><button type="button" onClick={disconnectGoogle}>Disconnect</button></div> : <button type="button" className="google-connect-button" onClick={() => { setGoogleError(""); startGoogleConnect(); }}><CalendarDays size={14} /> Connect Google</button>}
             </div>
           </div>
 
@@ -638,7 +638,7 @@ export default function App() {
           <div className="onboarding-top"><div className="onboarding-mark"><CalendarDays size={24} /></div><span>YOUR SETUP GUIDE</span><button className="onboarding-skip" onClick={() => { try { localStorage.setItem("smart-calendar-onboarding-done", "yes"); } catch {} setShowOnboarding(false); }}>Skip for now</button></div>
           <div className="onboarding-progress"><span className={onboardingStep >= 0 ? "done" : ""}></span><span className={onboardingStep >= 1 ? "done" : ""}></span><span className={onboardingStep >= 2 ? "done" : ""}></span></div>
           {onboardingStep === 0 ? <><p className="onboarding-eyebrow">WELCOME TO SMART CALENDAR</p><h2 id="onboarding-title">Your calendar, with a little help from AI.</h2><p className="onboarding-intro">Let’s set up your calendar and AI assistant in a few simple steps. You can finish setup now or return to this guide any time using the help icon.</p><div className="onboarding-choice"><div className="onboarding-choice-icon"><CalendarDays size={20}/></div><div><strong>1. Connect Google Calendar</strong><p>Sync your real events after Google Calendar authorization is configured for this app.</p><span className={accessToken ? "setup-status setup-ready" : "setup-status"}>{accessToken ? "Google Calendar connected" : "One-time Google setup required"}</span></div></div><div className="onboarding-choice"><div className="onboarding-choice-icon ai"><Sparkles size={20}/></div><div><strong>2. Connect your AI assistant</strong><p>Add an OpenAI-compatible provider URL, API key, and model name, then test the connection.</p><span className={isConfigured ? "setup-status setup-ready" : "setup-status"}>{isConfigured ? "AI settings already entered" : "Usually takes a minute"}</span></div></div><div className="onboarding-actions"><button className="primary-button onboarding-primary" onClick={() => setOnboardingStep(1)}>Let’s get started <ArrowRight size={16}/></button><span>About 3 minutes</span></div></> :
-          onboardingStep === 1 ? <><p className="onboarding-eyebrow">STEP 1 OF 2</p><h2 id="onboarding-title">Connect Google Calendar</h2><p className="onboarding-intro">Connect your Google account to see events and create, edit, or delete events directly from Smart Calendar.</p><ol className="onboarding-steps"><li><strong>Create or select a Google Cloud project</strong><p>Open <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer">Google Cloud Console</a>.</p></li><li><strong>Enable Google Calendar API</strong><p>Go to APIs &amp; Services → Library, search for Google Calendar API, and enable it.</p></li><li><strong>Configure the OAuth consent screen</strong><p>Set up the consent screen. While the app is in testing, add your Google account as a test user.</p></li><li><strong>Create an OAuth Client ID</strong><p>Open APIs &amp; Services → Credentials → Create Credentials → OAuth client ID. Choose Web application and add this exact origin to Authorized JavaScript origins: <code>{window.location.origin}</code>.</p></li><li><strong>Connect your account</strong><p>Open Google Calendar settings below, paste the Client ID, then choose your Google account and approve calendar access.</p></li></ol><div className="onboarding-security"><ShieldCheck size={17}/><span>Only your OAuth Client ID is entered here. Never paste a Google Client Secret into a browser app.</span></div><div className="onboarding-actions"><button className="secondary-button" onClick={() => setOnboardingStep(0)}>Back</button><button className="secondary-button" onClick={() => { try { localStorage.setItem("smart-calendar-onboarding-done", "yes"); } catch {} setShowOnboarding(false); setGoogleClientIdDraft(googleClientId); setGoogleError(""); setShowGoogleModal(true); }}>Open Google settings <CalendarDays size={16}/></button><button className="primary-button onboarding-primary" onClick={() => setOnboardingStep(2)}>Next: AI assistant <ArrowRight size={16}/></button></div></> :
+          onboardingStep === 1 ? <><p className="onboarding-eyebrow">STEP 1 OF 2</p><h2 id="onboarding-title">Connect Google Calendar</h2><p className="onboarding-intro">No long setup for you. Just connect your Google account and approve access so Smart Calendar can sync your schedule.</p><div className="onboarding-choice"><div className="onboarding-choice-icon"><CalendarDays size={20}/></div><div><strong>One secure connection</strong><p>Click Connect Google Calendar, select your Google account, and review the permission screen. Your events will then appear in this calendar.</p></div></div>{!GOOGLE_CLIENT_ID && <div className="onboarding-security"><ShieldCheck size={17}/><span>The site's Google connection is still being configured. You will be able to connect as soon as it is enabled.</span></div>}<div className="onboarding-actions"><button className="secondary-button" onClick={() => setOnboardingStep(0)}>Back</button><button className="secondary-button" onClick={() => { try { localStorage.setItem("smart-calendar-onboarding-done", "yes"); } catch {} setShowOnboarding(false); setGoogleError(""); startGoogleConnect(); }}><CalendarDays size={16}/> Connect Google Calendar</button><button className="primary-button onboarding-primary" onClick={() => setOnboardingStep(2)}>Next: AI assistant <ArrowRight size={16}/></button></div></> :
           <><p className="onboarding-eyebrow">STEP 2 OF 2</p><h2 id="onboarding-title">Connect your AI assistant</h2><p className="onboarding-intro">Use any provider that supports the OpenAI-compatible Chat Completions API.</p><ol className="onboarding-steps"><li><strong>Choose your API provider</strong><p>Get an API key and the exact model ID from your provider.</p></li><li><strong>Enter the connection details</strong><p>Open AI settings and fill in Base URL, API key, and Model name. For OpenAI, the base URL is <code>https://api.openai.com/v1</code>.</p></li><li><strong>Test, then save</strong><p>Choose “Test connection.” If it succeeds, select “Save settings” and send a message in the assistant panel.</p></li></ol><div className="onboarding-security"><ShieldCheck size={17}/><span>This prototype stores the API key in this browser and sends requests directly to your provider. For a public production app, use a secure backend.</span></div><div className="onboarding-actions"><button className="secondary-button" onClick={() => setOnboardingStep(1)}>Back</button><button className="secondary-button" onClick={() => { setShowOnboarding(false); setShowSettings(true); }}>Open AI settings <Settings2 size={16}/></button><button className="primary-button onboarding-primary" onClick={() => { try { localStorage.setItem("smart-calendar-onboarding-done", "yes"); } catch {} setShowOnboarding(false); }}>Finish setup <Check size={16}/></button></div></>}
         </section>
       </div>}
@@ -671,15 +671,15 @@ export default function App() {
       </div>}
       {showGoogleModal && <div className="modal-backdrop google-modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setShowGoogleModal(false); }}>
         <section className="settings-modal google-modal" role="dialog" aria-modal="true" aria-labelledby="google-modal-title">
-          <div className="modal-header"><div className="modal-heading-icon google-heading-icon"><CalendarDays size={20} /></div><div><h2 id="google-modal-title">Connect Google Calendar</h2><p>Authorize this site to read and manage events on your primary calendar.</p></div><IconButton title="Close Google Calendar settings" onClick={() => setShowGoogleModal(false)}><X size={19} /></IconButton></div>
-          <form className="settings-form" onSubmit={startGoogleConnect}>
-            <div className="google-setup-steps"><strong>Before connecting</strong><ol><li>Enable the Google Calendar API in your Google Cloud project.</li><li>Create an OAuth Client ID for a <b>Web application</b>.</li><li>Add this exact value as an Authorized JavaScript origin: <code>{window.location.origin}</code></li></ol><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Open Google Cloud credentials <ArrowRight size={13} /></a></div>
-            <label>Google OAuth Client ID <span>Required</span><input value={googleClientIdDraft} onChange={e => setGoogleClientIdDraft(e.target.value)} placeholder="123456789-abc.apps.googleusercontent.com" autoComplete="off" required /><small>Paste the Client ID only. Do not enter a Client Secret; this browser app does not need one.</small></label>
+          <div className="modal-header"><div className="modal-heading-icon google-heading-icon"><CalendarDays size={20} /></div><div><h2 id="google-modal-title">Connect Google Calendar</h2><p>One secure sign-in to sync your schedule with Google Calendar.</p></div><IconButton title="Close Google Calendar settings" onClick={() => setShowGoogleModal(false)}><X size={19} /></IconButton></div>
+          <div className="settings-form">
+            {!GOOGLE_CLIENT_ID ? <div className="google-not-ready"><ShieldCheck size={19}/><div><strong>Google connection is not enabled yet</strong><p>This site needs a one-time setup by its owner. You don't need to create or enter anything in Google Cloud yourself.</p></div></div> :
+              <div className="google-ready-copy"><div className="google-ready-mark"><Check size={18}/></div><div><strong>You're one step away</strong><p>Choose your Google account and approve calendar access on Google's secure consent screen.</p></div></div>}
             {googleError && <div className={"test-message " + (googleSyncState === "error" ? "test-error" : "")}><CircleHelp size={16} /><span>{googleError}</span></div>}
             {accessToken && <div className="test-message test-success"><Check size={16} /><span>Google Calendar is connected for this session. For security, the access token is kept in memory only.</span></div>}
-            <div className="security-note"><ShieldCheck size={17} /><span><strong>Permission requested</strong> — Smart Calendar requests access to view, create, edit, and delete events on your primary Google Calendar. You can disconnect it at any time.</span></div>
-            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowGoogleModal(false)}>Cancel</button><button type="submit" className="primary-button" disabled={!googleClientIdDraft.trim()}><CalendarDays size={16} /> Connect with Google</button></div>
-          </form>
+            <div className="security-note"><ShieldCheck size={17}/><span><strong>Your permission</strong> — Smart Calendar can read, create, edit, and delete events on your primary calendar. You can disconnect it at any time.</span></div>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setShowGoogleModal(false)}>Cancel</button>{GOOGLE_CLIENT_ID && <button type="button" className="primary-button" onClick={startGoogleConnect} disabled={!googleSdkReady}><CalendarDays size={16} /> {googleSdkReady ? "Continue with Google" : "Loading Google sign-in…"}</button>}</div>
+          </div>
         </section>
       </div>}
       {contextMenu && <div className="event-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} role="menu" aria-label="Event actions">
