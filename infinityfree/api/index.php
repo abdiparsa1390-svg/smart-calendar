@@ -32,6 +32,12 @@ $config = require $configFile;
 if (!is_array($config)) {
     respond(503, ['error' => 'The API configuration file is invalid.']);
 }
+
+$autoloadFile = __DIR__ . '/vendor/autoload.php';
+if (!is_file($autoloadFile)) {
+    respond(503, ['error' => 'The API dependencies are missing. Download and upload the complete package, including api/vendor/.']);
+}
+require_once $autoloadFile;
 try {
     foreach (['db_host', 'db_name', 'db_user', 'db_password', 'app_encryption_key', 'site_url'] as $key) {
         if (!isset($config[$key]) || !is_string($config[$key]) || trim($config[$key]) === '') {
