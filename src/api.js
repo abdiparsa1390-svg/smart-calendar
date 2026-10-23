@@ -16,6 +16,10 @@ export async function apiFetch(path, options = {}) {
   }
   const type = response.headers.get("content-type") || "";
   const data = type.includes("application/json") ? await response.json().catch(() => ({})) : {};
-  if (!response.ok) throw new Error(data?.error || data?.message || `Request failed (${response.status}).`);
+  if (!response.ok) {
+    const error = new Error(data?.error || data?.message || `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
