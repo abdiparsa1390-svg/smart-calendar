@@ -11,12 +11,8 @@ const CONFIG_KEY = "smart-calendar-ai-config-v1";
 const EVENTS_KEY = "smart-calendar-events-v1";
 const COLORS = ["#6d72d9", "#24a79b", "#e39c4c", "#de718d", "#6298dd"];
 const blankConfig = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "" };
-const GOOGLE_CLIENT_ID_KEY = "smart-calendar-google-client-id-v1";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
-
-function loadGoogleClientId() {
-  try { return localStorage.getItem(GOOGLE_CLIENT_ID_KEY) || ""; } catch { return ""; }
-}
 function googleEventToAppEvent(item) {
   const start = item.start?.dateTime ? new Date(item.start.dateTime) : new Date((item.start?.date || dayKey(new Date())) + "T09:00:00");
   const end = item.end?.dateTime ? new Date(item.end.dateTime) : new Date((item.end?.date || item.start?.date || dayKey(new Date())) + "T10:00:00");
@@ -132,8 +128,7 @@ export default function App() {
   const [editingEventId, setEditingEventId] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [googleClientId, setGoogleClientId] = useState(loadGoogleClientId);
-  const [googleClientIdDraft, setGoogleClientIdDraft] = useState(loadGoogleClientId);
+  const [googleSdkReady, setGoogleSdkReady] = useState(Boolean(window.google?.accounts?.oauth2));
   const [accessToken, setAccessToken] = useState("");
   const [googleError, setGoogleError] = useState("");
   const [googleSyncState, setGoogleSyncState] = useState("idle");
@@ -233,9 +228,12 @@ export default function App() {
   }, [accessToken, currentDate, view]);
 
   useEffect(() => {
-    if (!showGoogleModal) return;
-    loadGoogleIdentityScript().catch(error => setGoogleError(error.message));
-  }, [showGoogleModal]);
+    let active = true;
+    loadGoogleIdentityScript()
+      .then(() => { if (active) setGoogleSdkReady(true); })
+      .catch(error => { if (active) setGoogleError(error.message); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -279,8 +277,7 @@ export default function App() {
   }
   function openEditEvent(event) {
     if (event.source === "google" && !accessToken) {
-      setGoogleClientIdDraft(googleClientId);
-      setGoogleError("Reconnect Google Calendar to edit this synced event.");
+      setGoogleError("Reconnect Google Calendar to edit this event.");
       setShowGoogleModal(true);
       return;
     }
@@ -338,22 +335,30 @@ export default function App() {
       onPointerLeave: clearPressTimer
     };
   }
-  async function startGoogleConnect(e) {
+  function startGoogleConnect(e) {
     e?.preventDefault();
-    const clientId = googleClientIdDraft.trim();
-    if (!clientId) { setGoogleError("Enter your Google OAuth Client ID first."); return; }
+    if (!GOOGLE_CLIENT_ID) {
+      setGoogleError("Google Calendar connection has not been enabled for this site yet. The site owner needs to finish the one-time setup.");
+      setGoogleSyncState("error");
+      setShowGoogleModal(true);
+      return;
+    }
+    if (!window.google?.accounts?.oauth2) {
+      setGoogleError("Google sign-in is still loading. Please try again in a moment.");
+      setShowGoogleModal(true);
+      return;
+    }
+    setGoogleError("");
+    setGoogleSyncState("idle");
     try {
-      localStorage.setItem(GOOGLE_CLIENT_ID_KEY, clientId);
-      setGoogleClientId(clientId);
-      await loadGoogleIdentityScript();
-      if (!window.google?.accounts?.oauth2) throw new Error("Google authorization did not load. Please try again.");
       const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
+        client_id: GOOGLE_CLIENT_ID,
         scope: GOOGLE_SCOPE,
         callback: response => {
           if (response.error || !response.access_token) {
             setGoogleError(response.error_description || response.error || "Google authorization was cancelled.");
             setGoogleSyncState("error");
+            setShowGoogleModal(true);
             return;
           }
           setAccessToken(response.access_token);
@@ -362,12 +367,18 @@ export default function App() {
           setShowGoogleModal(false);
           setToast("Google Calendar connected");
         },
-        error_callback: response => setGoogleError(response?.message || "The Google sign-in popup could not open. Allow popups and try again.")
+        error_callback: response => {
+          setGoogleError(response?.message || "The Google sign-in popup could not open. Allow popups and try again.");
+          setGoogleSyncState("error");
+          setShowGoogleModal(true);
+        }
       });
       googleTokenClientRef.current = client;
-      client.requestAccessToken({ prompt: "consent" });
+      client.requestAccessToken({ prompt: "select_account" });
     } catch (error) {
       setGoogleError(error.message || "Could not start Google Calendar authorization.");
+      setGoogleSyncState("error");
+      setShowGoogleModal(true);
     }
   }
   function disconnectGoogle() {
