@@ -2,6 +2,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { promises as dns } from "node:dns";
+import { ProxyAgent } from "undici";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -31,9 +32,9 @@ function getKey(d){
  try{const k=fs.readFileSync(p);if(k.length!==32)throw Error("Local encryption key has an invalid size.");return k}
  catch(e){if(e.code!=="ENOENT")throw e;const k=crypto.randomBytes(32);fs.writeFileSync(p,k,{flag:"wx",mode:0o600});try{fs.chmodSync(p,0o600)}catch{}return k}
 }
-function blank(){return{version:1,events:[],ai:{baseUrl:"https://api.openai.com/v1",model:"",apiKeyCiphertext:"",apiKeyIv:"",apiKeyTag:""}}}
+function blank(){return{version:2,events:[],memoryFiles:{},ai:{baseUrl:"https://api.openai.com/v1",model:"",apiKeyCiphertext:"",apiKeyIv:"",apiKeyTag:"",providers:[]}}}
 function loadStore(p){
- try{const x=JSON.parse(fs.readFileSync(p,"utf8"));return x&&Array.isArray(x.events)&&x.ai?x:blank()}
+ try{const x=JSON.parse(fs.readFileSync(p,"utf8"));if(!x||!Array.isArray(x.events)||!x.ai)return blank();if(!x.ai.providers)x.ai.providers=[];if(!x.memoryFiles)x.memoryFiles={};return x}
  catch(e){if(e.code==="ENOENT")return blank();throw Error("Could not read local data at "+p+". Back up the file before repairing it.")}
 }
 function saveStore(p,x){const t=p+".tmp";fs.writeFileSync(t,JSON.stringify(x,null,2)+"\n",{mode:0o600});try{fs.chmodSync(t,0o600)}catch{}fs.renameSync(t,p);try{fs.chmodSync(p,0o600)}catch{}}
@@ -54,17 +55,63 @@ async function validateBase(input){
  catch(e){if(e.statusCode)throw e;throw Object.assign(Error("Could not verify the AI provider hostname. Check the Base URL."),{statusCode:400})}
  return u.toString().replace(/\/+$/,"");
 }
-function settingsOut(s){return{baseUrl:s.ai.baseUrl||"https://api.openai.com/v1",model:s.ai.model||"",apiKeyConfigured:Boolean(s.ai.apiKeyCiphertext)}}
-async function aiSettings(s,k,o={},allowNew=false){
- const baseUrl=await validateBase(o.baseUrl||s.ai.baseUrl),model=String(o.model||s.ai.model||"").trim(),apiKey=allowNew&&String(o.apiKey||"").trim()?String(o.apiKey).trim():decrypt(k,s.ai);
- if(!model||model.length>200||!apiKey||apiKey.length>4096)throw Object.assign(Error("Set your Base URL, model, and API key in AI settings first."),{statusCode:400});
- return{baseUrl,model,apiKey};
+function providerViews(s){
+ let list=Array.isArray(s.ai.providers)?s.ai.providers:[];
+ if(!list.length&&s.ai.apiKeyCiphertext)list=[{id:"primary",name:"Primary",baseUrl:s.ai.baseUrl||"https://api.openai.com/v1",model:s.ai.model||"",proxyUrl:"",enabled:true,apiKeyCiphertext:s.ai.apiKeyCiphertext,apiKeyIv:s.ai.apiKeyIv,apiKeyTag:s.ai.apiKeyTag}];
+ return list.map((p,i)=>({id:String(p.id||"provider-"+i),name:String(p.name||`Provider ${i+1}`),baseUrl:p.baseUrl||"",model:p.model||"",proxyUrl:p.proxyUrl||"",enabled:p.enabled!==false,apiKeyConfigured:Boolean(p.apiKeyCiphertext)}));
 }
-async function askAI(s,messages){
- const url=/\/chat\/completions$/i.test(s.baseUrl)?s.baseUrl:s.baseUrl+"/chat/completions";let r;
- try{r=await fetch(url,{method:"POST",redirect:"error",signal:AbortSignal.timeout(35000),headers:{"Content-Type":"application/json",Authorization:"Bearer "+s.apiKey},body:JSON.stringify({model:s.model,messages,temperature:0.7})})}
- catch{throw Object.assign(Error("Could not reach the AI provider. Check the Base URL and network connection."),{statusCode:502})}
- const d=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(Error(String(d?.error?.message||d?.message||("AI provider returned HTTP "+r.status)).slice(0,500)),{statusCode:502});return d;
+function settingsOut(s){const providers=providerViews(s);const primary=providers[0]||{};return{baseUrl:primary.baseUrl||s.ai.baseUrl||"https://api.openai.com/v1",model:primary.model||s.ai.model||"",apiKeyConfigured:Boolean(primary.apiKeyConfigured||s.ai.apiKeyCiphertext),providers,fallbackEnabled:true};}
+async function validateProxy(input){
+ const raw=String(input||"").trim();if(!raw)return "";
+ let u;try{u=new URL(raw)}catch{throw Object.assign(Error("Enter a valid HTTP or HTTPS proxy URL."),{statusCode:400})}
+ if(!["http:","https:"].includes(u.protocol)||!u.hostname||u.search||u.hash)throw Object.assign(Error("Proxy URL must use HTTP or HTTPS and must not include query parameters or fragments."),{statusCode:400});
+ if(u.username||u.password)throw Object.assign(Error("Do not put proxy credentials in the URL; use a proxy without embedded credentials."),{statusCode:400});
+ return u.toString().replace(/\/$/,"");
+}
+async function resolveProviders(s,k,o={},allowNew=false){
+ const incoming=Array.isArray(o.providers)?o.providers:null;
+ let desired=incoming&&incoming.length?incoming:[{id:"primary",name:"Primary",baseUrl:o.baseUrl||s.ai.baseUrl,model:o.model||s.ai.model,apiKey:o.apiKey||"",proxyUrl:o.proxyUrl||"",enabled:true}];
+ const stored=Array.isArray(s.ai.providers)?s.ai.providers:[];
+ const out=[];
+ for(let i=0;i<desired.length;i++){
+  const p=desired[i]||{};if(p.enabled===false)continue;
+  const id=String(p.id||"provider-"+i).slice(0,100);
+  const old=stored.find(x=>String(x.id)===id)||stored.find(x=>x.baseUrl===p.baseUrl&&x.name===p.name);
+  const legacy=(i===0&&!stored.length)?s.ai:null;
+  const baseUrl=await validateBase(p.baseUrl||legacy?.baseUrl||"");
+  const model=String(p.model||legacy?.model||"").trim();
+  const newKey=allowNew?String(p.apiKey||"").trim():"";
+  let apiKey=newKey;
+  if(!apiKey&&old?.apiKeyCiphertext)apiKey=decrypt(k,old);
+  if(!apiKey&&legacy?.apiKeyCiphertext)apiKey=decrypt(k,legacy);
+  if(!model||model.length>200||!apiKey||apiKey.length>4096)throw Object.assign(Error("Every enabled AI provider needs a valid Base URL, model, and API key."),{statusCode:400});
+  const proxyUrl=await validateProxy(p.proxyUrl||old?.proxyUrl||"");
+  out.push({id,name:String(p.name||`Provider ${i+1}`).slice(0,100),baseUrl,model,apiKey,proxyUrl,enabled:true});
+ }
+ if(!out.length)throw Object.assign(Error("Add at least one enabled AI provider."),{statusCode:400});
+ return out;
+}
+function saveProviders(s,k,providers){
+ s.ai.providers=providers.map(p=>{const c=encrypt(k,p.apiKey);return{id:p.id,name:p.name,baseUrl:p.baseUrl,model:p.model,proxyUrl:p.proxyUrl,enabled:true,apiKeyCiphertext:c.ciphertext,apiKeyIv:c.iv,apiKeyTag:c.tag}});
+ const p=providers[0];s.ai.baseUrl=p.baseUrl;s.ai.model=p.model;
+ const c=encrypt(k,p.apiKey);s.ai.apiKeyCiphertext=c.ciphertext;s.ai.apiKeyIv=c.iv;s.ai.apiKeyTag=c.tag;
+}
+async function askAI(providers,messages){
+ const failures=[];
+ for(const p of providers){
+  let dispatcher;
+  try{
+   const url=/\/chat\/completions$/i.test(p.baseUrl)?p.baseUrl:p.baseUrl+"/chat/completions";
+   if(p.proxyUrl)dispatcher=new ProxyAgent(p.proxyUrl);
+   const r=await fetch(url,{method:"POST",redirect:"error",signal:AbortSignal.timeout(35000),headers:{"Content-Type":"application/json",Authorization:"Bearer "+p.apiKey},body:JSON.stringify({model:p.model,messages,temperature:0.7}),...(dispatcher?{dispatcher}:{})});
+   const d=await r.json().catch(()=>({}));
+   if(!r.ok)throw Error(String(d?.error?.message||d?.message||("AI provider returned HTTP "+r.status)).slice(0,350));
+   if(!d?.choices?.[0]?.message?.content)throw Error("The provider returned no assistant message.");
+   return {data:d,providerName:p.name,providerId:p.id};
+  }catch(e){failures.push(p.name+": "+String(e.message||"connection failed").slice(0,300));}
+  finally{if(dispatcher)await dispatcher.close().catch(()=>{});}
+ }
+ throw Object.assign(Error("All AI providers failed. "+failures.join(" | ")),{statusCode:502});
 }
 function cleanEvent(e){
  const title=String(e?.title||"").trim().slice(0,240),start=new Date(e?.start),end=new Date(e?.end);
@@ -94,16 +141,32 @@ export async function start(args=process.argv.slice(2)){
     if(method==="PUT"&&p==="/api/events"){if(!Array.isArray(b.events)||b.events.length>1000)return json(res,400,{error:"Events must be an array of no more than 1,000 items."});store.events=b.events.map(cleanEvent);saveStore(dataPath,store);return json(res,200,{saved:store.events.length})}
     if(method==="GET"&&p==="/api/ai/settings")return json(res,200,settingsOut(store));
     if(method==="PUT"&&p==="/api/ai/settings"){
-     const baseUrl=await validateBase(b.baseUrl),model=String(b.model||"").trim(),apiKey=String(b.apiKey||"").trim();
-     if(!model||model.length>200)return json(res,400,{error:"Enter a valid model name."});if(apiKey.length>4096)return json(res,400,{error:"The API key is too long."});
-     if(apiKey){const c=encrypt(key,apiKey);store.ai.apiKeyCiphertext=c.ciphertext;store.ai.apiKeyIv=c.iv;store.ai.apiKeyTag=c.tag}else if(!store.ai.apiKeyCiphertext)return json(res,400,{error:"Enter your API key before saving settings."});
-     store.ai.baseUrl=baseUrl;store.ai.model=model;saveStore(dataPath,store);return json(res,200,{baseUrl,model,apiKeyConfigured:Boolean(store.ai.apiKeyCiphertext),message:"AI settings saved on this computer."});
+     const providers=await resolveProviders(store,key,b,true);
+     saveProviders(store,key,providers);saveStore(dataPath,store);
+     return json(res,200,{...settingsOut(store),message:"AI settings saved and encrypted on this computer."});
     }
-    if(method==="POST"&&p==="/api/ai/test"){const cfg=await aiSettings(store,key,b,true),reply=(await askAI(cfg,[{role:"user",content:"Reply with only: Connected"}]))?.choices?.[0]?.message?.content;if(!reply)return json(res,502,{error:"The AI provider returned no assistant message."});return json(res,200,{ok:true,message:"Connection successful. Your model replied to the test request."})}
+    if(method==="POST"&&p==="/api/ai/test"){
+     const providers=await resolveProviders(store,key,b,true);
+     const result=await askAI(providers,[{role:"user",content:"Reply with only: Connected"}]);
+     return json(res,200,{ok:true,providerId:result.providerId,providerName:result.providerName,message:"Connection successful. "+result.providerName+" replied to the test request."});
+    }
     if(method==="POST"&&p==="/api/ai/chat"){
      if(!Array.isArray(b.messages)||b.messages.length<1||b.messages.length>60)return json(res,400,{error:"Send between 1 and 60 chat messages."});
      const messages=[];for(const m of b.messages){if(!["system","user","assistant"].includes(m?.role)||typeof m?.content!=="string"||m.content.length>20000)return json(res,400,{error:"One or more chat messages are invalid."});messages.push({role:m.role,content:m.content})}
-     const cfg=await aiSettings(store,key),answer=(await askAI(cfg,messages))?.choices?.[0]?.message?.content;if(!answer)return json(res,502,{error:"The AI provider returned no assistant message."});return json(res,200,{content:typeof answer==="string"?answer:JSON.stringify(answer)});
+     const providers=await resolveProviders(store,key,{},false),result=await askAI(providers,messages),answer=result.data?.choices?.[0]?.message?.content;
+     return json(res,200,{content:typeof answer==="string"?answer:JSON.stringify(answer),providerName:result.providerName});
+    }
+    if(method==="GET"&&p==="/api/memory")return json(res,200,{files:store.memoryFiles||{}});
+    if(method==="PUT"&&p==="/api/memory"){
+     const allowed=new Set(["profile.md","goals.md","preferences.md","routines.md","planning.md"]),files=b.files;
+     if(!files||typeof files!=="object"||Array.isArray(files))return json(res,400,{error:"Send a Markdown files object."});
+     store.memoryFiles=store.memoryFiles||{};
+     for(const [name,content] of Object.entries(files)){
+      if(!allowed.has(name)||typeof content!=="string"||content.length>30000)return json(res,400,{error:"Invalid memory filename or content."});
+      store.memoryFiles[name]=content;
+      const dir=path.join(opt.dataDir,"memory");privateDir(dir);const fp=path.join(dir,name);fs.writeFileSync(fp,content.endsWith("\n")?content:content+"\n",{mode:0o600});try{fs.chmodSync(fp,0o600)}catch{}
+     }
+     saveStore(dataPath,store);return json(res,200,{saved:Object.keys(files),message:"Memory Markdown files saved locally."});
     }
     return json(res,404,{error:"API endpoint not found."});
    }
