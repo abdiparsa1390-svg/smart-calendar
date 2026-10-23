@@ -16,27 +16,38 @@ const blankConfig = { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 function googleEventToAppEvent(item) {
-  const start = item.start?.dateTime ? new Date(item.start.dateTime) : new Date((item.start?.date || dayKey(new Date())) + "T09:00:00");
-  const end = item.end?.dateTime ? new Date(item.end.dateTime) : new Date((item.end?.date || item.start?.date || dayKey(new Date())) + "T10:00:00");
+  const allDay = Boolean(item.start?.date && !item.start?.dateTime);
+  const start = item.start?.dateTime ? new Date(item.start.dateTime) : new Date((item.start?.date || dayKey(new Date())) + "T00:00:00");
+  const end = item.end?.dateTime ? new Date(item.end.dateTime) : new Date((item.end?.date || item.start?.date || dayKey(new Date())) + "T00:00:00");
+  const repeat = item.recurrence?.[0]?.match(/FREQ=([^;]+)/i)?.[1]?.toLowerCase() || "none";
+  const reminder = item.reminders?.useDefault ? "" : (item.reminders?.overrides || []).find(r => r.method === "popup")?.minutes ?? "";
   return {
-    id: item.id,
-    googleId: item.id,
-    source: "google",
-    title: item.summary || "Untitled event",
-    start,
-    end,
-    color: COLORS[1],
-    place: item.description || item.location || "",
-    googleUrl: item.htmlLink || ""
+    id: item.id, googleId: item.id, source: "google", title: item.summary || "Untitled event",
+    start, end, color: COLORS[1], place: item.description || "", location: item.location || "",
+    allDay, reminderMinutes: reminder, recurrence: repeat, googleUrl: item.htmlLink || ""
   };
 }
 function googlePayloadFromDraft(draft, start, end) {
-  return {
-    summary: draft.title.trim(),
-    description: draft.place || "",
-    start: { dateTime: start.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
-    end: { dateTime: end.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let startValue, endValue;
+  if (draft.allDay) {
+    const exclusiveEnd = new Date(start);
+    exclusiveEnd.setDate(exclusiveEnd.getDate() + 1);
+    startValue = { date: dayKey(start) };
+    endValue = { date: dayKey(exclusiveEnd) };
+  } else {
+    startValue = { dateTime: start.toISOString(), timeZone: timezone };
+    endValue = { dateTime: end.toISOString(), timeZone: timezone };
+  }
+  const payload = {
+    summary: draft.title.trim(), description: draft.place || "", location: draft.location || "",
+    start: startValue, end: endValue,
+    reminders: draft.reminderMinutes === "" || draft.reminderMinutes == null
+      ? { useDefault: true }
+      : { useDefault: false, overrides: [{ method: "popup", minutes: Number(draft.reminderMinutes) }] }
   };
+  if (draft.recurrence && draft.recurrence !== "none") payload.recurrence = ["RRULE:FREQ=" + String(draft.recurrence).toUpperCase()];
+  return payload;
 }
 function loadGoogleIdentityScript() {
   if (window.google?.accounts?.oauth2) return Promise.resolve();
@@ -156,7 +167,7 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [mobilePanel, setMobilePanel] = useState("calendar");
   const [toast, setToast] = useState("");
-  const [draft, setDraft] = useState({ title: "", date: dayKey(new Date()), start: "09:00", end: "10:00", color: COLORS[0], place: "" });
+  const [draft, setDraft] = useState({ title: "", date: dayKey(new Date()), start: "09:00", end: "10:00", color: COLORS[0], place: "", location: "", allDay: false, reminderMinutes: 10, recurrence: "none" });
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -381,7 +392,7 @@ export default function App() {
   }
   function openNewEvent(date = currentDate, hour = 9) {
     setEditingEventId(null);
-    setDraft({ title: "", date: dayKey(date), start: String(hour).padStart(2, "0") + ":00", end: String(Math.min(hour + 1, 23)).padStart(2, "0") + ":00", color: COLORS[0], place: "" });
+    setDraft({ title: "", date: dayKey(date), start: String(hour).padStart(2, "0") + ":00", end: String(Math.min(hour + 1, 23)).padStart(2, "0") + ":00", color: COLORS[0], place: "", location: "", allDay: false, reminderMinutes: 10, recurrence: "none" });
     setShowEventModal(true);
   }
   function openEditEvent(event) {
@@ -397,7 +408,11 @@ export default function App() {
       start: String(event.start.getHours()).padStart(2, "0") + ":" + String(event.start.getMinutes()).padStart(2, "0"),
       end: String(event.end.getHours()).padStart(2, "0") + ":" + String(event.end.getMinutes()).padStart(2, "0"),
       color: event.color || COLORS[0],
-      place: event.place || ""
+      place: event.place || "",
+      location: event.location || "",
+      allDay: Boolean(event.allDay),
+      reminderMinutes: event.reminderMinutes ?? 10,
+      recurrence: event.recurrence || "none"
     });
     setShowEventModal(true);
     setContextMenu(null);
